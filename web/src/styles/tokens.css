@@ -1,0 +1,112 @@
+/*
+ * 设计令牌 · 唯一真源（DESIGN.md §1.2 / §1.3 / §1.4）
+ * 组件只引用变量，禁止写死色值、圆角、阴影、动效时长。
+ */
+:root {
+  /* 主色：墨蓝。只用于导航选中、主按钮、链接、数字下钻，不用于大面积背景 */
+  --c-primary: #1b4d8f;
+  --c-primary-hover: #16407a;
+  --c-primary-active: #113463;
+  --c-primary-soft: #eaf1fa;
+  --c-primary-border: #c7d9ef;
+
+  /* 文字与线 */
+  --c-ink-900: #0f172a;
+  --c-ink-700: #344054;
+  --c-ink-600: #475467;
+  --c-ink-500: #667085;
+  --c-ink-400: #98a2b3;
+  --c-line: #e4e7ec;
+  --c-line-soft: #f2f4f7;
+  --c-bg: #f6f7f9;
+  --c-surface: #ffffff;
+  --c-surface-hover: #f9fafb;
+
+  /* 语义色（文字色 / 浅底 / 边框） */
+  --c-danger: #d92d20;
+  --c-danger-text: #b42318;
+  --c-danger-soft: #fef3f2;
+  --c-danger-border: #fda29b;
+  --c-warn: #b54708;
+  --c-warn-soft: #fffaeb;
+  --c-warn-border: #fedf89;
+  --c-success: #067647;
+  --c-success-soft: #ecfdf3;
+  --c-success-border: #abefc6;
+  --c-info: #175cd3;
+  --c-info-soft: #eff8ff;
+  --c-info-border: #b2ddff;
+  --c-purple: #6941c6;
+  --c-purple-soft: #f4f3ff;
+
+  /* 第三方品牌色：仅钉钉登录按钮一处 */
+  --c-dingtalk: #1677ff;
+  --c-dingtalk-hover: #0e63dc;
+
+  /* 字体 */
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB',
+    'Microsoft YaHei', sans-serif;
+  --font-num: 'SF Mono', ui-monospace, Menlo, Consolas, monospace; /* 仅用于 ID、编号，不用于大数字 */
+
+  /* 字体阶梯（px / 行高 / 字重） */
+  --fs-display: 32px;
+  --lh-display: 40px;
+  --fs-h1: 24px;
+  --lh-h1: 32px;
+  --fs-h2: 20px;
+  --lh-h2: 28px;
+  --fs-h3: 16px;
+  --lh-h3: 24px;
+  --fs-body: 14px;
+  --lh-body: 22px;
+  --fs-body-sm: 13px;
+  --lh-body-sm: 20px;
+  --fs-caption: 12px;
+  --lh-caption: 18px;
+  --fs-micro: 11px;
+  --lh-micro: 16px;
+
+  /* 间距（只允许这套值） */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+  --sp-10: 40px;
+  --sp-12: 48px;
+
+  /* 圆角 */
+  --r-sm: 4px;
+  --r-md: 6px;
+  --r-lg: 8px;
+  --r-xl: 12px;
+  --r-pill: 999px;
+
+  /* 阴影 */
+  --sh-1: 0 1px 2px rgba(16, 24, 40, 0.04);
+  --sh-2: 0 4px 12px rgba(16, 24, 40, 0.08);
+  --sh-3: 0 12px 32px rgba(16, 24, 40, 0.14);
+  --focus-ring: 0 0 0 3px rgba(27, 77, 143, 0.18);
+
+  /* 动效 */
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+  --t-press: 80ms;
+  --t-hover: 120ms;
+  --t-toggle: 180ms;
+  --t-panel: 240ms;
+
+  /* 层级 */
+  --z-nav: 10;
+  --z-thead: 20;
+  --z-dropdown: 40;
+  --z-overlay: 60;
+  --z-toast: 70;
+
+  /* 布局 */
+  --nav-w: 224px;
+  --nav-w-collapsed: 64px;
+  --topbar-h: 56px;
+  --content-max: 1440px;
+}
