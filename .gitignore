@@ -1,2 +1,39 @@
 # TeamFlow 运行日志（插件自有产物，非交付物；host 提交时另有 pathspec 强制排除）
 logs/teamflow/
+
+# 后端构建产物
+server/target/
+target/
+*.class
+*.jar
+
+# Maven 本地仓库（本机 ~/.m2 不可写时重定向到项目内，见 server/.mvn/maven.config）
+server/.mvn/repo/
+server/.mvn/home/
+
+# 前端依赖与构建产物
+node_modules/
+dist/
+.pnpm-store/
+*.tsbuildinfo
+
+# IDE / 编辑器
+.idea/
+*.iml
+.vscode/
+.settings/
+.classpath
+.project
+
+# 本地配置、密钥与钉钉凭证（一律不进仓库）
+.env
+.env.local
+application-local.yml
+application-*.local.yml
+*.log
+logs/
+*.dump
+
+# 操作系统
+.DS_Store
+Thumbs.db

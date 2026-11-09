@@ -1,0 +1,251 @@
+<script setup lang="ts">
+/**
+ * 任务池筛选条（DESIGN §4.2）：控件高 32，六个条件可组合，全部进 URL。
+ * 生效条件用 chips 回显，可单独移除或一键清空 —— 用户永远看得见「现在筛的是什么」。
+ */
+import { computed } from 'vue'
+import AppInput from '@/components/ui/AppInput.vue'
+import AppSelect from '@/components/ui/AppSelect.vue'
+import AppButton from '@/components/ui/AppButton.vue'
+import type { SourceType, TaskStatus } from '@/types/enums'
+import { SOURCE_TYPE_LABELS, TASK_STATUS_LABELS } from '@/types/enums'
+import type { UserOption } from '@/types/api'
+
+export interface PoolFilters {
+  status: TaskStatus | ''
+  ownerId: number | ''
+  sourceType: SourceType | ''
+  meetingId: number | ''
+  overdue: boolean | ''
+  keyword: string
+}
+
+const props = withDefaults(
+  defineProps<{
+    modelValue: PoolFilters
+    owners: UserOption[]
+    meetings: Array<{ id: number; title: string }>
+    loading?: boolean
+  }>(),
+  { loading: false },
+)
+
+const emit = defineEmits<{ 'update:modelValue': [value: PoolFilters] }>()
+
+const STATUS_OPTIONS = [
+  { label: '全部状态', value: '' },
+  ...(Object.keys(TASK_STATUS_LABELS) as TaskStatus[]).map((status) => ({
+    label: TASK_STATUS_LABELS[status],
+    value: status,
+  })),
+]
+
+const SOURCE_OPTIONS = [
+  { label: '全部来源', value: '' },
+  ...(Object.keys(SOURCE_TYPE_LABELS) as SourceType[]).map((type) => ({
+    label: SOURCE_TYPE_LABELS[type],
+    value: type,
+  })),
+]
+
+const OVERDUE_OPTIONS = [
+  { label: '是否逾期', value: '' },
+  { label: '仅逾期', value: 'true' },
+  { label: '未逾期', value: 'false' },
+]
+
+const ownerOptions = computed(() => [
+  { label: '全部负责人', value: '' },
+  ...(Array.isArray(props.owners) ? props.owners : []).map((owner) => ({
+    label: owner.name,
+    value: owner.id,
+  })),
+])
+
+const meetingOptions = computed(() => [
+  { label: '全部会议', value: '' },
+  ...(Array.isArray(props.meetings) ? props.meetings : []).map((meeting) => ({
+    label: meeting.title,
+    value: meeting.id,
+  })),
+])
+
+function patch(part: Partial<PoolFilters>): void {
+  emit('update:modelValue', { ...props.modelValue, ...part })
+}
+
+function onOwner(value: string): void {
+  patch({ ownerId: value ? Number(value) : '' })
+}
+
+function onMeeting(value: string): void {
+  patch({ meetingId: value ? Number(value) : '' })
+}
+
+function onOverdue(value: string): void {
+  patch({ overdue: value === '' ? '' : value === 'true' })
+}
+
+interface Chip {
+  key: keyof PoolFilters
+  label: string
+}
+
+const chips = computed<Chip[]>(() => {
+  const filter = props.modelValue
+  const list: Chip[] = []
+  if (filter.status) list.push({ key: 'status', label: TASK_STATUS_LABELS[filter.status] })
+  if (filter.ownerId !== '') {
+    const owner = props.owners.find((item) => item.id === filter.ownerId)
+    list.push({ key: 'ownerId', label: owner ? owner.name : `负责人 #${filter.ownerId}` })
+  }
+  if (filter.sourceType) {
+    list.push({ key: 'sourceType', label: SOURCE_TYPE_LABELS[filter.sourceType] })
+  }
+  if (filter.meetingId !== '') {
+    const meeting = props.meetings.find((item) => item.id === filter.meetingId)
+    list.push({ key: 'meetingId', label: meeting ? meeting.title : `会议 #${filter.meetingId}` })
+  }
+  if (filter.overdue !== '') list.push({ key: 'overdue', label: filter.overdue ? '仅逾期' : '未逾期' })
+  if (filter.keyword.trim()) list.push({ key: 'keyword', label: `关键词：${filter.keyword.trim()}` })
+  return list
+})
+
+function removeChip(key: keyof PoolFilters): void {
+  if (key === 'keyword') patch({ keyword: '' })
+  else if (key === 'overdue') patch({ overdue: '' })
+  else if (key === 'status') patch({ status: '' })
+  else if (key === 'sourceType') patch({ sourceType: '' })
+  else if (key === 'ownerId') patch({ ownerId: '' })
+  else patch({ meetingId: '' })
+}
+
+function clearAll(): void {
+  emit('update:modelValue', {
+    status: '',
+    ownerId: '',
+    sourceType: '',
+    meetingId: '',
+    overdue: '',
+    keyword: '',
+  })
+}
+</script>
+
+<template>
+  <div class="filter">
+    <div class="filter__row">
+      <AppInput
+        class="filter__search"
+        :model-value="modelValue.keyword"
+        size="compact"
+        type="search"
+        placeholder="搜索标题"
+        aria-label="搜索标题"
+        @update:model-value="patch({ keyword: $event })"
+      />
+      <AppSelect
+        :model-value="modelValue.status"
+        :options="STATUS_OPTIONS"
+        size="compact"
+        aria-label="状态筛选"
+        @update:model-value="patch({ status: $event as TaskStatus | '' })"
+      />
+      <AppSelect
+        :model-value="modelValue.ownerId"
+        :options="ownerOptions"
+        size="compact"
+        aria-label="负责人筛选"
+        @update:model-value="onOwner"
+      />
+      <AppSelect
+        :model-value="modelValue.sourceType"
+        :options="SOURCE_OPTIONS"
+        size="compact"
+        aria-label="来源类型筛选"
+        @update:model-value="patch({ sourceType: $event as SourceType | '' })"
+      />
+      <AppSelect
+        :model-value="modelValue.meetingId"
+        :options="meetingOptions"
+        size="compact"
+        aria-label="来源会议筛选"
+        @update:model-value="onMeeting"
+      />
+      <AppSelect
+        :model-value="modelValue.overdue === '' ? '' : String(modelValue.overdue)"
+        :options="OVERDUE_OPTIONS"
+        size="compact"
+        aria-label="逾期筛选"
+        @update:model-value="onOverdue"
+      />
+    </div>
+
+    <div v-if="chips.length" class="filter__chips">
+      <button
+        v-for="chip in chips"
+        :key="chip.key"
+        type="button"
+        class="chip"
+        :aria-label="`移除筛选：${chip.label}`"
+        @click="removeChip(chip.key)"
+      >
+        <span>{{ chip.label }}</span>
+        <span class="chip__x" aria-hidden="true">×</span>
+      </button>
+      <AppButton variant="ghost" size="compact" @click="clearAll">清除全部</AppButton>
+    </div>
+  </div>
+</template>
+
+<style scoped>
+.filter {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+.filter__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--sp-2);
+}
+.filter__search {
+  width: 240px;
+}
+.filter__chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  height: 24px;
+  padding: 0 var(--sp-2);
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-pill);
+  background: var(--c-surface);
+  color: var(--c-ink-700);
+  font-size: var(--fs-micro);
+  cursor: pointer;
+  transition: border-color var(--t-hover) var(--ease), color var(--t-hover) var(--ease);
+}
+.chip:hover {
+  border-color: var(--c-primary-border);
+  color: var(--c-primary);
+}
+.chip:focus-visible {
+  outline: 2px solid var(--c-primary);
+  outline-offset: 1px;
+}
+.chip__x {
+  font-size: var(--fs-caption);
+  color: var(--c-ink-400);
+}
+.chip:hover .chip__x {
+  color: var(--c-primary);
+}
+</style>
