@@ -14,7 +14,6 @@ import OverduePill from '@/components/ui/OverduePill.vue'
 import SourceTag from '@/components/ui/SourceTag.vue'
 import ErrorState from '@/components/ui/ErrorState.vue'
 import TaskActions from '@/components/task/TaskActions.vue'
-import TransitionTimeline from '@/components/task/TransitionTimeline.vue'
 import UrgeButton from '@/components/task/UrgeButton.vue'
 import TaskFormDrawer from '@/components/task/TaskFormDrawer.vue'
 import ProgressComposer from '@/components/task/ProgressComposer.vue'
@@ -44,7 +43,7 @@ const progressTotal = ref(0)
 const progressLoading = ref(true)
 const progressError = ref<ApiError | null>(null)
 const bannerDismissed = ref(false)
-let anchorTimer: ReturnType<typeof setTimeout> | undefined
+let anchorTimer: number | undefined
 
 const mentionOnly = computed(() => detail.value?.permissions?.mentionOnly === true)
 const mentionerName = computed(
@@ -275,6 +274,7 @@ onMounted(() => {
         </div>
         <div class="head__actions">
           <UrgeButton
+            v-if="!mentionOnly"
             :task-id="detail.id"
             :owner-name="detail.owner?.name"
             :last-urged-at="detail.lastUrgedAt ?? null"
@@ -284,6 +284,7 @@ onMounted(() => {
             @urged="onUrged"
           />
           <TaskActions
+            v-if="!mentionOnly"
             :task="detail"
             :owners="owners"
             :can-edit="canEdit"
@@ -333,7 +334,8 @@ onMounted(() => {
                 />
                 <span class="source__type">{{ sourceLabel }}</span>
               </div>
-              <template v-if="detail.source?.type === 'MEETING'">
+              <!-- 形态以「是否绑定会议」为准，不按来源编码判断：自定义会议型来源同样渲染（D-01 / AC-5） -->
+              <template v-if="detail.source?.meetingId != null">
                 <p class="source__meeting">
                   <RouterLink
                     v-if="detail.source.meetingId"
@@ -383,10 +385,36 @@ onMounted(() => {
             </dl>
           </section>
 
-          <!-- ④ 事件时间线 -->
+          <!-- ④ 进度与流转（合并时间线） -->
           <section class="panel">
-            <h2 class="panel__title">流转记录</h2>
-            <TransitionTimeline :events="detail.events ?? []" />
+            <div class="panel__head">
+              <h2 class="panel__title">进度与流转</h2>
+              <span class="panel__count num" :class="{ 'is-limit': progressTotal >= 200 }">
+                进度 {{ progressTotal }}/200
+              </span>
+            </div>
+
+            <ProgressComposer
+              :task-id="detail.id"
+              :total="progressTotal"
+              @created="onProgressCreated"
+            />
+
+            <div v-if="progressLoading" class="tl-skeleton" aria-busy="true" aria-live="polite">
+              <span class="visually-hidden">正在加载进度</span>
+              <div v-for="n in 3" :key="`tl-sk-${n}`" class="tl-skeleton__row">
+                <span class="tl-skeleton__dot" aria-hidden="true" />
+                <span class="sk-block tl-skeleton__line" />
+              </div>
+            </div>
+
+            <template v-else>
+              <div v-if="progressError" class="tl-error" role="alert">
+                <span>进度加载失败，流转记录仍可查看。</span>
+                <button type="button" class="tl-error__retry" @click="loadProgress">重试</button>
+              </div>
+              <ProgressTimeline :progress="progress" :events="detail.events ?? []" />
+            </template>
           </section>
         </div>
 
@@ -437,6 +465,7 @@ onMounted(() => {
         :task="detail"
         :owners="owners"
         :meetings="meetings"
+        :source-types="sourceTypes"
         @close="editOpen = false"
         @saved="onSaved"
       />
@@ -706,5 +735,129 @@ onMounted(() => {
   font-size: var(--fs-caption);
   line-height: 1.5;
   color: var(--c-ink-400);
+}
+
+/* ---- 被 @ 提示条（DESIGN §1.3 / §3.8） ---- */
+.mention-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: 40px;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--c-info-border);
+  border-radius: var(--r-md);
+  background: var(--c-info-soft);
+  color: var(--c-info);
+}
+.mention-banner__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex: none;
+  border-radius: var(--r-pill);
+  background: var(--c-surface);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+}
+.mention-banner__text {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  font-size: var(--fs-body-sm);
+  line-height: 20px;
+}
+.mention-banner__close {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--c-info);
+  font-family: inherit;
+  font-size: var(--fs-h3);
+  line-height: 1;
+  cursor: pointer;
+}
+.mention-banner__close:hover {
+  background: var(--c-surface);
+}
+.mention-banner__close:focus-visible {
+  outline: 2px solid var(--c-info);
+  outline-offset: 1px;
+}
+
+/* ---- 进度与流转面板头 ---- */
+.panel__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-3);
+}
+.panel__head .panel__title {
+  margin-bottom: 0;
+}
+.panel__count {
+  color: var(--c-ink-500);
+  font-size: var(--fs-caption);
+  line-height: 18px;
+  white-space: nowrap;
+}
+.panel__count.is-limit {
+  color: var(--c-warn);
+  font-weight: 600;
+}
+
+/* ---- 合并时间线的加载与错误（DESIGN §1.5） ---- */
+.tl-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+.tl-skeleton__row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+.tl-skeleton__dot {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--c-line);
+}
+.tl-skeleton__line {
+  width: 62%;
+  height: 12px;
+  border-radius: var(--r-sm);
+}
+.tl-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--c-danger-border);
+  border-radius: var(--r-sm);
+  background: var(--c-danger-soft);
+  color: var(--c-danger-text);
+  font-size: var(--fs-caption);
+}
+.tl-error__retry {
+  flex: none;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--c-danger-text);
+  font-family: inherit;
+  font-size: var(--fs-caption);
+  font-weight: 600;
+  text-decoration: underline;
+  cursor: pointer;
 }
 </style>

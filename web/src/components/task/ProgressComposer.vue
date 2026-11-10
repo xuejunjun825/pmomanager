@@ -101,8 +101,9 @@ function closePicker(): void {
 }
 
 function togglePicker(): void {
-  if (pickerOpen.value) closePicker()
-  else openPicker()
+  // 点「@ 提及成员」只负责打开：关闭交给浮层自身（点外部 / Esc / Tab），
+  // 否则按钮的 mousedown 会先关掉浮层、click 又把它打开，形成点不关的死循环。
+  openPicker()
 }
 
 /** 选中成员时在光标处补 @姓名；同一姓名已存在则不重复插入 */
@@ -112,8 +113,10 @@ function insertMentionText(user: UserOption): void {
   const element = textareaRef.value
   const start = element?.selectionStart ?? content.value.length
   const end = element?.selectionEnd ?? content.value.length
-  const snippet = `${token} `
-  content.value = `${content.value.slice(0, start)}${snippet}${content.value.slice(end)}`
+  const before = content.value.slice(0, start)
+  const lead = before.length > 0 && !/\s$/.test(before) ? ' ' : ''
+  const snippet = `${lead}${token} `
+  content.value = `${before}${snippet}${content.value.slice(end)}`
   void nextTick(() => {
     element?.focus()
     const caret = start + snippet.length

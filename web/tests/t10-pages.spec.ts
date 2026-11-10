@@ -171,13 +171,30 @@ describe('ConfirmDialog', () => {
 
 describe('NotificationsPage', () => {
   it('倒序列表 + 未读点；点击通知先置已读再跳任务详情', async () => {
-    notificationsApiMock.list.mockResolvedValue({
-      items: [notification(), notification({ id: 2, typeLabel: '督办日报', taskId: null, taskTitle: null, channelStatus: 'NOT_CONFIGURED', channelLabel: '钉钉未配置', read: true })],
-      total: 2,
-      page: 1,
-      size: 20,
-      unreadCount: 1,
-    })
+    notificationsApiMock.list.mockImplementation((query: { type?: string }) =>
+      Promise.resolve(
+        query?.type === 'MENTION'
+          ? { items: [], total: 4, page: 1, size: 1, unreadCount: 1 }
+          : {
+              items: [
+                notification(),
+                notification({
+                  id: 2,
+                  typeLabel: '督办日报',
+                  taskId: null,
+                  taskTitle: null,
+                  channelStatus: 'NOT_CONFIGURED',
+                  channelLabel: '钉钉未配置',
+                  read: true,
+                }),
+              ],
+              total: 2,
+              page: 1,
+              size: 20,
+              unreadCount: 1,
+            },
+      ),
+    )
     const { wrapper, router, pinia } = await mountAt(NotificationsPage, '/notifications')
     const store = useNotificationsStore(pinia)
 
@@ -196,18 +213,17 @@ describe('NotificationsPage', () => {
   })
 
   it('切到未读 tab 带 unreadOnly=true 重新查询；空态文案区分全部/未读', async () => {
-    notificationsApiMock.list.mockResolvedValueOnce({
-      items: [notification()],
-      total: 1,
-      page: 1,
-      size: 20,
-      unreadCount: 1,
-    })
-    notificationsApiMock.list.mockResolvedValueOnce({ items: [], total: 0, page: 1, size: 20, unreadCount: 0 })
+    notificationsApiMock.list.mockImplementation((query: { unreadOnly?: boolean }) =>
+      Promise.resolve(
+        query?.unreadOnly
+          ? { items: [], total: 0, page: 1, size: 20, unreadCount: 0 }
+          : { items: [notification()], total: 1, page: 1, size: 20, unreadCount: 1 },
+      ),
+    )
 
     const { wrapper } = await mountAt(NotificationsPage, '/notifications')
     const tabs = wrapper.findAll('.tabs__item')
-    await tabs[1].trigger('click')
+    await tabs[2].trigger('click')
     await flushPromises()
 
     expect(notificationsApiMock.list).toHaveBeenLastCalledWith({ unreadOnly: true, page: 1, size: 20 })
@@ -216,20 +232,24 @@ describe('NotificationsPage', () => {
   })
 
   it('全部标为已读：二次确认 → 调接口 → 角标归零', async () => {
-    // 第一次加载 1 条未读；标为已读后的重载由服务端如实返回 0
-    notificationsApiMock.list.mockResolvedValueOnce({
-      items: [notification()],
-      total: 1,
-      page: 1,
-      size: 20,
-      unreadCount: 1,
-    })
-    notificationsApiMock.list.mockResolvedValueOnce({
-      items: [notification({ read: true })],
-      total: 1,
-      page: 1,
-      size: 20,
-      unreadCount: 0,
+    // 标为已读后的重载由服务端如实返回 0
+    let cleared = false
+    notificationsApiMock.list.mockImplementation((query: { type?: string }) =>
+      Promise.resolve(
+        query?.type === 'MENTION'
+          ? { items: [], total: 1, page: 1, size: 1, unreadCount: cleared ? 0 : 1 }
+          : {
+              items: [notification({ read: cleared })],
+              total: 1,
+              page: 1,
+              size: 20,
+              unreadCount: cleared ? 0 : 1,
+            },
+      ),
+    )
+    notificationsApiMock.markAllRead.mockImplementation(async () => {
+      cleared = true
+      return { updated: 1 }
     })
     const { wrapper, pinia } = await mountAt(NotificationsPage, '/notifications')
     const store = useNotificationsStore(pinia)

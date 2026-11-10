@@ -17,7 +17,7 @@ import ErrorState from '@/components/ui/ErrorState.vue'
 import Modal from '@/components/ui/Modal.vue'
 import PageHeader from '@/components/ui/PageHeader.vue'
 import Pagination from '@/components/ui/Pagination.vue'
-import { notificationsApi } from '@/api/notifications'
+import { notificationsApi, type NotificationListQuery } from '@/api/notifications'
 import { toApiError, type ApiError } from '@/api/http'
 import { useNotificationsStore } from '@/stores/notifications'
 import { useToast } from '@/composables/useToast'
@@ -29,13 +29,16 @@ const router = useRouter()
 const store = useNotificationsStore()
 const toast = useToast()
 
+type NoticeTab = 'all' | 'mention' | 'unread'
+
 const items = ref<NotificationRow[]>([])
 const total = ref(0)
 const page = ref(1)
 const size = ref(20)
-const unreadOnly = ref(false)
+const tab = ref<NoticeTab>('all')
 const unread = ref(0)
 const allTotal = ref<number | null>(null)
+const mentionTotal = ref<number | null>(null)
 const loading = ref(false)
 const error = ref<ApiError | null>(null)
 const confirmAll = ref(false)
@@ -44,24 +47,47 @@ const channelNote = ref<NotificationRow | null>(null)
 
 const hasUnread = computed(() => unread.value > 0)
 
+const emptyTitle = computed(() => {
+  if (tab.value === 'mention') return '还没有人 @ 你'
+  if (tab.value === 'unread') return '全部已读，干得漂亮'
+  return '暂无通知'
+})
+const emptyDescription = computed(() => {
+  if (tab.value === 'mention') return '被 @ 时，会出现在这里。'
+  if (tab.value === 'unread') return '新通知到达后会出现在这里。'
+  return '任务逾期、被催办或被验收打回时，系统会在这里提醒你。'
+})
+
 function typeText(item: NotificationRow): string {
   return item.typeLabel || NOTIFY_TYPE_LABELS[item.type as NotifyType] || '通知'
+}
+
+/** MENTION 深链：任务 + 对应进度锚点；其余通知仍落任务详情 */
+function targetOf(item: NotificationRow): string | null {
+  if (!item.taskId) return null
+  if (item.type === 'MENTION' && item.progressId) {
+    return `/tasks/${item.taskId}#progress-${item.progressId}`
+  }
+  return `/tasks/${item.taskId}`
 }
 
 async function load(): Promise<void> {
   loading.value = true
   error.value = null
   try {
-    const data = await notificationsApi.list({
-      unreadOnly: unreadOnly.value,
+    const query: NotificationListQuery = {
+      unreadOnly: tab.value === 'unread',
       page: page.value,
       size: size.value,
-    })
+    }
+    if (tab.value === 'mention') query.type = 'MENTION'
+    const data = await notificationsApi.list(query)
     items.value = data.items ?? []
     total.value = data.total ?? 0
     unread.value = data.unreadCount ?? 0
     store.setUnread(unread.value)
-    if (!unreadOnly.value) allTotal.value = total.value
+    if (tab.value === 'all') allTotal.value = total.value
+    if (tab.value === 'mention') mentionTotal.value = total.value
   } catch (e) {
     error.value = toApiError(e)
   } finally {
@@ -69,9 +95,20 @@ async function load(): Promise<void> {
   }
 }
 
-function switchTab(next: boolean): void {
-  if (unreadOnly.value === next) return
-  unreadOnly.value = next
+/** 「@我的」计数在初始加载时单独取一次，三个 tab 的数才同时可见 */
+async function loadMentionCount(): Promise<void> {
+  if (mentionTotal.value !== null) return
+  try {
+    const data = await notificationsApi.list({ type: 'MENTION', page: 1, size: 1 })
+    mentionTotal.value = Number(data?.total ?? 0)
+  } catch {
+    // 计数失败不影响主列表；切到该 tab 时会再次尝试
+  }
+}
+
+function switchTab(next: NoticeTab): void {
+  if (tab.value === next) return
+  tab.value = next
   page.value = 1
   void load()
 }
@@ -106,8 +143,9 @@ async function markRead(item: NotificationRow): Promise<boolean> {
 
 async function openItem(item: NotificationRow): Promise<void> {
   await markRead(item)
-  if (item.taskId) {
-    void router.push(`/tasks/${item.taskId}`)
+  const target = targetOf(item)
+  if (target) {
+    void router.push(target)
     return
   }
   toast.info('该通知没有关联任务，已标为已读')
@@ -131,12 +169,13 @@ async function markAll(): Promise<void> {
 
 onMounted(() => {
   void load()
+  void loadMentionCount()
 })
 </script>
 
 <template>
   <div class="notices">
-    <PageHeader title="通知中心" description="逾期提醒、催办与验收打回都会出现在这里。">
+    <PageHeader title="通知中心" description="逾期提醒、催办、验收打回与被 @ 都会出现在这里。">
       <template #actions>
         <AppButton variant="ghost" size="compact" :disabled="!hasUnread" @click="confirmAll = true">
           全部标为已读
@@ -150,9 +189,9 @@ onMounted(() => {
           type="button"
           class="tabs__item"
           role="tab"
-          :aria-selected="!unreadOnly"
-          :class="{ 'tabs__item--active': !unreadOnly }"
-          @click="switchTab(false)"
+          :aria-selected="tab === 'all'"
+          :class="{ 'tabs__item--active': tab === 'all' }"
+          @click="switchTab('all')"
         >
           全部
           <span v-if="allTotal !== null" class="tabs__count num">{{ allTotal }}</span>
@@ -161,9 +200,20 @@ onMounted(() => {
           type="button"
           class="tabs__item"
           role="tab"
-          :aria-selected="unreadOnly"
-          :class="{ 'tabs__item--active': unreadOnly }"
-          @click="switchTab(true)"
+          :aria-selected="tab === 'mention'"
+          :class="{ 'tabs__item--active': tab === 'mention' }"
+          @click="switchTab('mention')"
+        >
+          @我的
+          <span v-if="mentionTotal !== null" class="tabs__count num">{{ mentionTotal }}</span>
+        </button>
+        <button
+          type="button"
+          class="tabs__item"
+          role="tab"
+          :aria-selected="tab === 'unread'"
+          :class="{ 'tabs__item--active': tab === 'unread' }"
+          @click="switchTab('unread')"
         >
           未读
           <span v-if="unread > 0" class="tabs__count num">{{ unread }}</span>
@@ -187,10 +237,8 @@ onMounted(() => {
 
       <EmptyState
         v-else-if="!items.length"
-        :title="unreadOnly ? '全部已读，干得漂亮' : '暂无通知'"
-        :description="
-          unreadOnly ? '新通知到达后会出现在这里。' : '任务逾期、被催办或被验收打回时，系统会在这里提醒你。'
-        "
+        :title="emptyTitle"
+        :description="emptyDescription"
         size="sm"
       />
 
@@ -208,12 +256,16 @@ onMounted(() => {
             @click="openItem(item)"
           >
             <span class="notice__title">
-              <span class="notice__type">{{ typeText(item) }}</span>
+              <span
+                class="notice__type"
+                :class="{ 'notice__type--mention': item.type === 'MENTION' }"
+              >{{ typeText(item) }}</span>
               <span v-if="item.taskTitle" class="notice__task">{{ item.taskTitle }}</span>
               <span v-else class="notice__task notice__task--muted">系统通知</span>
             </span>
             <span class="notice__sub">
-              <template v-if="item.ownerName">负责人 {{ item.ownerName }}</template>
+              <template v-if="item.type === 'MENTION'">在任务《{{ item.taskTitle || '任务' }}》中@了你，点击定位到对应进度</template>
+              <template v-else-if="item.ownerName">负责人 {{ item.ownerName }}</template>
               <template v-else>无需处理，仅供知悉</template>
             </span>
           </button>
@@ -403,9 +455,23 @@ onMounted(() => {
   font-weight: 600;
 }
 .notice__type {
+  display: inline-flex;
+  align-items: center;
   flex: none;
+  height: 18px;
+  padding: 0 5px;
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-sm);
+  background: var(--c-surface);
   color: var(--c-ink-700);
-  font-weight: inherit;
+  font-size: var(--fs-micro);
+  font-weight: 500;
+  line-height: 16px;
+}
+.notice__type--mention {
+  border-color: var(--c-info-border);
+  background: var(--c-info-soft);
+  color: var(--c-info);
 }
 .notice__task {
   overflow: hidden;

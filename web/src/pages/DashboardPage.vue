@@ -64,10 +64,20 @@ const meetingOptions = computed<SelectOption[]>(() => [
   { label: '全部会议', value: '' },
   ...meetings.value.map((meeting) => ({ label: meeting.title, value: String(meeting.id) })),
 ])
-const sourceOptions = computed<SelectOption[]>(() => [
-  { label: '全部来源', value: '' },
-  ...sourceTypes.value.map((item) => ({ label: item.label, value: item.value })),
-])
+/** 与任务池/矩阵同口径（AC-5）：启用项按 sort 在前，停用项按 sort 在后并标注（D-02） */
+const sourceOptions = computed<SelectOption[]>(() => {
+  const ordered = [...sourceTypes.value].sort((a, b) => {
+    if (a.enabled !== b.enabled) return a.enabled ? -1 : 1
+    return a.sort - b.sort
+  })
+  return [
+    { label: '全部来源', value: '' },
+    ...ordered.map((item) => ({
+      label: item.enabled === false ? `${item.label}（已停用）` : item.label,
+      value: item.value,
+    })),
+  ]
+})
 
 const kpis = computed(() => view.value?.kpis ?? null)
 const focusRows = computed<TaskRow[]>(() => view.value?.focus ?? [])

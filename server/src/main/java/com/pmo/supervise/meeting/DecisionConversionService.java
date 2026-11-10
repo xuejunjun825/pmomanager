@@ -5,6 +5,7 @@ import com.pmo.supervise.common.BusinessException;
 import com.pmo.supervise.common.ErrorCode;
 import com.pmo.supervise.common.ShanghaiClock;
 import com.pmo.supervise.meeting.dto.ConvertResult;
+import com.pmo.supervise.source.SourceCodes;
 import com.pmo.supervise.task.TaskAccessGuard;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -34,7 +35,7 @@ public class DecisionConversionService {
             INSERT INTO tasks
                 (title, owner_id, due_date, source_type, source_meeting_id, source_decision_item_id,
                  source_note, status, dispatcher_id, priority)
-            VALUES (?, ?, ?, 'MEETING', ?, ?, NULL, 'PENDING', ?, 'MEDIUM')
+            VALUES (?, ?, ?, ?, ?, ?, NULL, 'PENDING', ?, 'MEDIUM')
             """;
 
     private final MeetingService meetingService;
@@ -107,9 +108,10 @@ public class DecisionConversionService {
             ps.setString(1, item.getDescription());
             ps.setLong(2, item.getOwnerId());
             ps.setObject(3, item.getDueDate() == null ? clock.today() : item.getDueDate());
-            ps.setLong(4, item.getMeetingId());
-            ps.setLong(5, item.getId());
-            ps.setLong(6, dispatcherId);
+            ps.setString(4, SourceCodes.MEETING);
+            ps.setLong(5, item.getMeetingId());
+            ps.setLong(6, item.getId());
+            ps.setLong(7, dispatcherId);
             return ps;
         }, keyHolder);
         Number key = keyHolder.getKey();

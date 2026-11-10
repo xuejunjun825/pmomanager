@@ -15,7 +15,6 @@ import com.pmo.supervise.task.dto.TaskEventRow;
 import com.pmo.supervise.task.dto.TaskPermissions;
 import com.pmo.supervise.task.dto.UpdateTaskRequest;
 import com.pmo.supervise.task.dto.UserRef;
-import com.pmo.supervise.task.progress.TaskProgressDao;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -37,17 +36,15 @@ public class TaskService {
     private final TaskAccessGuard guard;
     private final JdbcTemplate jdbc;
     private final SourceTypeService sourceTypes;
-    private final TaskProgressDao progressDao;
 
     public TaskService(TaskRepository taskRepository, TaskQueryDao queryDao,
                        TaskAccessGuard guard, JdbcTemplate jdbc,
-                       SourceTypeService sourceTypes, TaskProgressDao progressDao) {
+                       SourceTypeService sourceTypes) {
         this.taskRepository = taskRepository;
         this.queryDao = queryDao;
         this.guard = guard;
         this.jdbc = jdbc;
         this.sourceTypes = sourceTypes;
-        this.progressDao = progressDao;
     }
 
     @Transactional
@@ -164,11 +161,11 @@ public class TaskService {
         }
 
         // 被 @ 的人拿到「只读可见 + 续写进度」视角：状态动作整组隐藏，接口侧仍 403 兜底（AC-8）。
+        // 可查看谓词只在 TaskAccessGuard.canView 一处（D-03）：此处复用，不再复制一份「被 @」判断。
         boolean globalReader = actor.isAdmin() || actor.isExec();
-        boolean mentioned = !globalReader && task.getOwnerId() != actor.id()
-                && progressDao.isMentioned(task.getId(), actor.id());
-        boolean canAddProgress = globalReader || task.getOwnerId() == actor.id() || mentioned;
-        boolean mentionOnly = mentioned;
+        boolean canView = guard.canView(actor, task);
+        boolean canAddProgress = canView;
+        boolean mentionOnly = canView && !globalReader && !owner;
 
         return new TaskPermissions(canStart, canSubmit, canAccept, canReject, canCancel, canRestore,
                 canForceComplete, canReassign, canReschedule, canUrge, canAddProgress, mentionOnly, reasons);

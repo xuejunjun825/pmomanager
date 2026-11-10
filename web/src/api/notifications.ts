@@ -3,23 +3,26 @@
  * 列表返回 unreadCount，页面据此同步顶栏角标，不再单独猜数字。
  */
 import { apiGet, apiPost } from './http'
+import type { NotifyType } from '@/types/enums'
 import type { NotificationPage } from '@/types/api'
 
 export interface NotificationListQuery {
   unreadOnly?: boolean
+  /** 「@我的」tab：服务端按类型过滤（分页与未读计数才不会错） */
+  type?: NotifyType
   page?: number
   size?: number
 }
 
 export const notificationsApi = {
   list(query: NotificationListQuery = {}): Promise<NotificationPage> {
-    return apiGet<NotificationPage>('/notifications', {
-      params: {
-        unreadOnly: query.unreadOnly ?? false,
-        page: query.page ?? 1,
-        size: query.size ?? 20,
-      },
-    })
+    const params: Record<string, string | number | boolean> = {
+      unreadOnly: query.unreadOnly ?? false,
+      page: query.page ?? 1,
+      size: query.size ?? 20,
+    }
+    if (query.type) params.type = query.type
+    return apiGet<NotificationPage>('/notifications', { params })
   },
 
   unreadCount(): Promise<{ count: number }> {

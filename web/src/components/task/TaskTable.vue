@@ -55,7 +55,8 @@ function finished(row: TaskRow): boolean {
 function sourceText(row: TaskRow): string {
   const source = row.source
   if (!source) return '—'
-  if (source.type === 'MEETING') {
+  // 形态以「是否绑定会议」为准，不按来源编码判断：自定义会议型来源编码不是 MEETING（D-01 / AC-5）
+  if (source.meetingId != null) {
     return source.meetingTitle || source.note || '会议决议'
   }
   return source.note || '—'

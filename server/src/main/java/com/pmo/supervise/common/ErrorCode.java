@@ -17,6 +17,7 @@ public enum ErrorCode {
     FORBIDDEN(HttpStatus.FORBIDDEN, "无权执行该操作"),
     NOT_FOUND(HttpStatus.NOT_FOUND, "对象不存在或无权访问"),
     VALIDATION_FAILED(HttpStatus.UNPROCESSABLE_ENTITY, "请求参数校验失败"),
+    METHOD_NOT_ALLOWED(HttpStatus.METHOD_NOT_ALLOWED, "请求方法不支持"),
     TASK_INVALID_TRANSITION(HttpStatus.CONFLICT, "当前状态下不能执行该动作"),
     TASK_SOURCE_IMMUTABLE(HttpStatus.UNPROCESSABLE_ENTITY, "任务来源不可修改"),
     TASK_FINISHED(HttpStatus.CONFLICT, "任务已结束"),

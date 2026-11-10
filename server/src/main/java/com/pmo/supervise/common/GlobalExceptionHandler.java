@@ -10,6 +10,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.validation.FieldError;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -99,6 +100,15 @@ public class GlobalExceptionHandler {
         ApiError body = new ApiError(ErrorCode.NOT_FOUND.name(), "接口不存在",
                 List.of(), Map.of(), traceId(request));
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(body);
+    }
+
+    /** 方法不匹配（如 PATCH 打到只支持 PUT 的端点）应是 405，不能落到兜底 500（D-04）。 */
+    @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
+    public ResponseEntity<ApiError> handleMethodNotSupported(HttpRequestMethodNotSupportedException ex,
+                                                             HttpServletRequest request) {
+        ApiError body = new ApiError(ErrorCode.METHOD_NOT_ALLOWED.name(), ErrorCode.METHOD_NOT_ALLOWED.defaultMessage(),
+                List.of(), Map.of(), traceId(request));
+        return ResponseEntity.status(HttpStatus.METHOD_NOT_ALLOWED).body(body);
     }
 
     @ExceptionHandler(Exception.class)
