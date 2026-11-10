@@ -18,6 +18,8 @@ import type { DashboardView, MatrixView, TaskRow } from '@/types/api'
 const matrixApiMock = vi.hoisted(() => ({ load: vi.fn() }))
 const dashboardApiMock = vi.hoisted(() => ({ load: vi.fn() }))
 const metaApiMock = vi.hoisted(() => ({ options: vi.fn() }))
+// 看板焦点列表内嵌任务详情抽屉，抽屉挂载即拉进度（不替身会打真实 XHR）。
+const taskProgressMock = vi.hoisted(() => vi.fn())
 
 vi.mock('@/api/matrix', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/api/matrix')>()
@@ -30,6 +32,10 @@ vi.mock('@/api/dashboard', async (importOriginal) => {
 vi.mock('@/api/meta', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/api/meta')>()
   return { ...actual, metaApi: metaApiMock }
+})
+vi.mock('@/api/tasks', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/api/tasks')>()
+  return { ...actual, taskApi: { ...actual.taskApi, progress: taskProgressMock } }
 })
 
 const { ApiError } = await import('@/api/http')
@@ -160,6 +166,7 @@ beforeEach(() => {
   })
   matrixApiMock.load.mockResolvedValue(matrixView())
   dashboardApiMock.load.mockResolvedValue(dashboardView())
+  taskProgressMock.mockResolvedValue({ items: [], total: 0, hasMore: false })
 })
 
 describe('MatrixPage 项目筛选', () => {

@@ -15,7 +15,7 @@ import SourceTypeFormModal from './SourceTypeFormModal.vue'
 import { sourceTypesApi } from '@/api/sourceTypes'
 import { toApiError } from '@/api/http'
 import { useToast } from '@/composables/useToast'
-import { SOURCE_FORM_LABELS } from '@/types/enums'
+import { SOURCE_FORM_LABELS, type SourceForm } from '@/types/enums'
 import type { SourcePaletteEntry, SourceTypeRow } from '@/types/api'
 
 const MAX_ENABLED = 20
@@ -38,6 +38,8 @@ const rootRef = ref<HTMLElement | null>(null)
 const modalOpen = ref(false)
 const editing = ref<SourceTypeRow | null>(null)
 const creating = ref(false)
+/** 打开弹窗时的旧形态与引用量：保存成功后的改形富文案（DESIGN §3.3）依赖它，弹窗只回新行 */
+const editOrigin = ref<{ form: SourceForm; usageCount: number } | null>(null)
 
 const deleteTarget = ref<SourceTypeRow | null>(null)
 const deleting = ref(false)
@@ -74,24 +76,45 @@ function openCreate(): void {
   if (limitReached.value) return
   creating.value = true
   editing.value = null
+  editOrigin.value = null
   modalOpen.value = true
 }
 
 function openEdit(row: SourceTypeRow): void {
   creating.value = false
   editing.value = row
+  editOrigin.value = { form: row.form, usageCount: row.usageCount }
   modalOpen.value = true
+}
+
+/** 改形富文案（DESIGN §3.3）：说明「数据不迁移」，并给出受影响的历史任务数与去向 */
+function formChangeMessage(
+  row: SourceTypeRow,
+  origin: { form: SourceForm; usageCount: number },
+): string {
+  const base = `已将「${row.name}」改为${SOURCE_FORM_LABELS[row.form]}`
+  if (origin.usageCount <= 0) return base
+  if (row.form === 'PROJECT') return `${base}；${origin.usageCount} 条历史任务显示为未指定项目`
+  if (origin.form === 'PROJECT') return `${base}；${origin.usageCount} 条历史任务的项目照旧展示`
+  return base
 }
 
 function onSaved(row: SourceTypeRow): void {
   modalOpen.value = false
-  toast.success(creating.value ? `已新增来源「${row.name}」` : `已保存来源「${row.name}」`)
   if (creating.value) {
+    toast.success(`已新增来源「${row.name}」`)
     pendingCode.value = row.code
   } else {
+    const origin = editOrigin.value
+    toast.success(
+      origin && origin.form !== row.form
+        ? formChangeMessage(row, origin)
+        : `已保存来源「${row.name}」`,
+    )
     flash(row.code)
   }
   editing.value = null
+  editOrigin.value = null
   creating.value = false
   emit('refresh')
 }

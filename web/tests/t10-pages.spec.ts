@@ -27,10 +27,29 @@ const usersApiMock = vi.hoisted(() => ({
   resetPassword: vi.fn(),
 }))
 const settingsApiMock = vi.hoisted(() => ({ get: vi.fn(), updateReport: vi.fn() }))
+// r4：设置页新增「项目配置」卡（仅 ADMIN 在 onMounted 拉取），不替身会打真实 XHR。
+const projectsApiMock = vi.hoisted(() => ({
+  list: vi.fn(),
+  create: vi.fn(),
+  update: vi.fn(),
+  setEnabled: vi.fn(),
+  remove: vi.fn(),
+}))
+// r3 起设置页的「来源配置」卡同样在 onMounted 拉取（list + palette），一并未替身。
+const sourceTypesApiMock = vi.hoisted(() => ({
+  list: vi.fn(),
+  palette: vi.fn(),
+  create: vi.fn(),
+  update: vi.fn(),
+  setEnabled: vi.fn(),
+  remove: vi.fn(),
+}))
 
 vi.mock('@/api/notifications', () => ({ notificationsApi: notificationsApiMock }))
 vi.mock('@/api/users', () => ({ usersApi: usersApiMock }))
 vi.mock('@/api/settings', () => ({ settingsApi: settingsApiMock }))
+vi.mock('@/api/projects', () => ({ projectsApi: projectsApiMock }))
+vi.mock('@/api/sourceTypes', () => ({ sourceTypesApi: sourceTypesApiMock }))
 
 import ChannelChip from '@/components/ui/ChannelChip.vue'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
@@ -121,6 +140,9 @@ beforeEach(() => {
   usersApiMock.options.mockResolvedValue([])
   settingsApiMock.get.mockResolvedValue(settingsView())
   settingsApiMock.updateReport.mockResolvedValue(undefined)
+  projectsApiMock.list.mockResolvedValue([])
+  sourceTypesApiMock.list.mockResolvedValue([])
+  sourceTypesApiMock.palette.mockResolvedValue([])
 })
 
 describe('ChannelChip', () => {

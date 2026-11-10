@@ -14,11 +14,14 @@ import { createPinia, setActivePinia } from 'pinia'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import type { TaskDetail } from '@/types/api'
 
-const mocks = vi.hoisted(() => ({ get: vi.fn() }))
+const mocks = vi.hoisted(() => ({ get: vi.fn(), progress: vi.fn() }))
 
 vi.mock('@/api/tasks', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/api/tasks')>()
-  return { ...actual, taskApi: { ...actual.taskApi, get: mocks.get } }
+  return {
+    ...actual,
+    taskApi: { ...actual.taskApi, get: mocks.get, progress: mocks.progress },
+  }
 })
 vi.mock('@/api/meta', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/api/meta')>()
@@ -91,6 +94,8 @@ describe('TaskDetailPage 项目位', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     mocks.get.mockReset()
+    mocks.progress.mockReset()
+    mocks.progress.mockResolvedValue({ items: [], total: 0, hasMore: false })
   })
 
   it('已绑项目：名称完整展示，链接指向任务池并预置 project 筛选', async () => {
