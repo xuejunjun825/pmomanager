@@ -11,6 +11,8 @@ export const dashboardApi = {
     const params: Record<string, string | number> = {}
     if (query.ownerId !== undefined && query.ownerId !== '') params.ownerId = query.ownerId
     if (query.sourceType) params.sourceType = query.sourceType
+    // 与任务池/矩阵同名同义（AC-5）：后端同一个 ProjectFilterSql，前端不拼条件
+    if (query.project) params.project = query.project
     if (query.meetingId !== undefined && query.meetingId !== '') params.meetingId = query.meetingId
     params.focusLimit = query.focusLimit ?? 10
     return apiGet<DashboardView>('/dashboard', { params })

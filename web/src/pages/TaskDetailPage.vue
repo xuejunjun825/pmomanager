@@ -12,6 +12,7 @@ import OwnerChip from '@/components/ui/OwnerChip.vue'
 import StatusBadge from '@/components/ui/StatusBadge.vue'
 import OverduePill from '@/components/ui/OverduePill.vue'
 import SourceTag from '@/components/ui/SourceTag.vue'
+import ProjectTag from '@/components/ui/ProjectTag.vue'
 import ErrorState from '@/components/ui/ErrorState.vue'
 import TaskActions from '@/components/task/TaskActions.vue'
 import UrgeButton from '@/components/task/UrgeButton.vue'
@@ -24,6 +25,7 @@ import { toApiError, type ApiError } from '@/api/http'
 import { useAuthStore } from '@/stores/auth'
 import { formatDate, formatDateTime, formatUrgeSummary } from '@/utils/format'
 import { PRIORITY_LABELS, TASK_STATUS_LABELS } from '@/types/enums'
+import { DISABLED_SUFFIX, projectView } from '@/utils/projectOptions'
 import type { TaskStatus } from '@/types/enums'
 import type { MetaOptions, ProgressRow, TaskDetail, UrgeResult, UserOption } from '@/types/api'
 
@@ -55,6 +57,18 @@ const canEdit = computed(() => auth.role === 'ADMIN')
 const owners = computed<UserOption[]>(() => (Array.isArray(meta.value?.owners) ? meta.value!.owners : []))
 const meetings = computed(() => (Array.isArray(meta.value?.meetings) ? meta.value!.meetings : []))
 const sourceTypes = computed(() => (Array.isArray(meta.value?.sourceTypes) ? meta.value!.sourceTypes : []))
+
+/**
+ * 项目位（AC-7）：只有「已绑项目」与「改形历史（形态为项目但无项目）」要渲染，
+ * 会议/说明来源不产生任何元素；判定集中在 projectView，页面不自己比 projectId。
+ */
+const sourceProject = computed(() => projectView(detail.value?.source))
+/** 项目名完整展示（20 字不截断），只有停用才加后缀，未知（null）按启用显示 */
+const sourceProjectName = computed(() => {
+  const view = sourceProject.value
+  if (!view) return ''
+  return view.name || `项目 #${detail.value?.source?.projectId ?? '—'}`
+})
 
 /* ---- 通知深链 #progress-{id}：定位 + 1600ms 高亮 + 聚焦 ---- */
 const anchorProgressId = computed(() => {
@@ -327,6 +341,15 @@ onMounted(() => {
                   :meeting-title="detail.source.meetingTitle"
                 />
                 <span v-else class="source__type">—</span>
+                <!-- 项目位（AC-7）：已绑项目可下钻到任务池同名筛选；改形历史「未指定项目」不可点；会议/说明不渲染 -->
+                <RouterLink
+                  v-if="detail.source?.projectId != null"
+                  :to="{ path: '/tasks', query: { project: String(detail.source.projectId) } }"
+                  class="source__project"
+                >
+                  {{ sourceProjectName }}<span v-if="sourceProject && !sourceProject.enabled">{{ DISABLED_SUFFIX }}</span>
+                </RouterLink>
+                <ProjectTag v-else-if="sourceProject?.unspecified" unspecified />
               </div>
               <!-- 形态以「是否绑定会议」为准，不按来源编码判断：自定义会议型来源同样渲染（D-01 / AC-5） -->
               <template v-if="detail.source?.meetingId != null">
@@ -631,6 +654,7 @@ onMounted(() => {
 .source__head {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: var(--sp-2);
 }
 .source__type {
@@ -649,6 +673,22 @@ onMounted(() => {
 }
 .source__link:hover {
   text-decoration: underline;
+}
+/* 项目名是详情里的可读事实：20 字不截断、不省略，只做换行（AC-7） */
+.source__project {
+  color: var(--c-primary);
+  font-size: var(--fs-body-sm);
+  font-weight: 600;
+  text-decoration: none;
+  overflow-wrap: anywhere;
+  border-radius: var(--r-sm);
+}
+.source__project:hover {
+  text-decoration: underline;
+}
+.source__project:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
 }
 .source__note {
   margin: 0;

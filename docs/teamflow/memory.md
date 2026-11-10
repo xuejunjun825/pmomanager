@@ -1,7 +1,7 @@
 # 产品记忆 · 会议任务督办系统
 
 ## 技术栈与结构
-- 后端 `server/`：Spring Boot 3.3.5 / Java 17 / MySQL 8 / Flyway V1–V3 / Spring Security（Session + CSRF Cookie）；前端 `web/`：Vue 3 + Vite + TypeScript + Pinia；单实例，`@Scheduled` 承担扫描与报表。
+- 后端 `server/`：Spring Boot 3.3.5 / Java 17 / MySQL 8 / Flyway V1–V6 / Spring Security（Session + CSRF Cookie）；前端 `web/`：Vue 3 + Vite + TypeScript + Pinia；单实例，`@Scheduled` 承担扫描与报表。
 - 交付：README（启动、时区、admin 初始口令 `Admin@12345` 首登改密、钉钉配置清单）、docker-compose、deploy/ 示例、scripts/smoke-api.sh。
 
 ## 团队约定
@@ -11,6 +11,9 @@
 - 通知幂等：`dedup_key` 唯一键 INSERT-catch；扫描/报表一天一次由 `job_runs(job_key,run_date)` 主键保证。
 - 钉钉未配置：`DingTalkProperties` 判定，渠道状态 `NOT_CONFIGURED` 不重试；入口隐藏、推送跳过、业务零 500。
 - 来源类型唯一配置源（r2 起）：管理端维护、任务只存编码；内置 `MEETING/PROJECT/DAILY` 不可删，「会议决议」不可停用；任务进度 append-only 不改状态，@ 通知按（进度, 被 @ 人）幂等，被 @ 人获得该任务只读可见与续写进度权。前端来源选项投影唯一实现 `web/src/utils/sourceOptions.ts:sourceOptions()`（r3 起：占位/启用优先/停用标注集中，抽屉传 `allOption:false, includeDisabled:false`），页面不得自拼；任务详情来源只由 `SourceTag` 渲染一次。
+- 来源形态三态（r4 起）：`MEETING` 绑会议+决议项 / `PROJECT` 绑项目 / `NOTE` 自由说明，三者互斥由服务端单点判定、库层只兜「至多一类非空」；形态变更不迁移历史任务数据（改形后历史任务显示「未指定项目」）。注意内置来源编码 `PROJECT`（项目任务）是 `NOTE` 形态，与形态值同名不同义，不得互相兜底。
+- 项目是主数据不是权限维度（r4 起）：仅 ADMIN 维护（名称唯一 2–20 字、编码 `P%05d` 系统生成不可改、被引用只能停用、上限 200），全员可读可筛；建任务时「形态 ↔ 字段」配对由服务端单点判定，库层 `ck_tasks_source` 只兜「三组字段恰好一组非空」。
+- 项目三处单一实现点（r4 起，禁止复制）：筛选谓词只有 `server/src/main/java/com/pmo/supervise/project/ProjectFilterSql.java:append()`（任务池/看板经 `TaskQueryBuilder`、矩阵经 `MatrixService` 共用，`none` = 未指定项目，走 `source_types` 子查询）；前端下拉投影只有 `web/src/utils/projectOptions.ts:projectOptions()`、项目位判定只有 `projectView()`，渲染只有 `web/src/components/ui/ProjectTag.vue`。任务池/矩阵/看板三处合计必须对齐，任何页面不得自拼项目条件或自行比较 `enabled/sort`。
 - 错误体统一 `{code,message,fieldErrors,details,traceId}`，前端 `http.ts` 归一化；会话 7d，CSRF 使用明文 token 契约（`CsrfTokenRequestAttributeHandler`）。
 - 契约文档只写 `docs/teamflow/<yyyyMMdd-rN-slug>/`；跨需求记忆在本文件。
 

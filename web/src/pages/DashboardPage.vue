@@ -9,6 +9,7 @@ import PageHeader from '@/components/ui/PageHeader.vue'
 import KpiCard from '@/components/ui/KpiCard.vue'
 import DataTable from '@/components/ui/DataTable.vue'
 import AppSelect from '@/components/ui/AppSelect.vue'
+import AppSearchSelect from '@/components/ui/AppSearchSelect.vue'
 import AppInput from '@/components/ui/AppInput.vue'
 import AppDatePicker from '@/components/ui/AppDatePicker.vue'
 import AppButton from '@/components/ui/AppButton.vue'
@@ -16,6 +17,7 @@ import Modal from '@/components/ui/Modal.vue'
 import StatusBadge from '@/components/ui/StatusBadge.vue'
 import OverduePill from '@/components/ui/OverduePill.vue'
 import SourceTag from '@/components/ui/SourceTag.vue'
+import ProjectTag from '@/components/ui/ProjectTag.vue'
 import UrgeButton from '@/components/task/UrgeButton.vue'
 import ErrorState from '@/components/ui/ErrorState.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
@@ -28,10 +30,11 @@ import { toApiError, type ApiError } from '@/api/http'
 import { formatDate, formatNumber, formatPercent } from '@/utils/format'
 import { isFinishedStatus } from '@/types/enums'
 import type { SourceType } from '@/types/enums'
-import type { DashboardView, SourceTypeOption, TaskRow, UrgeResult, UserOption } from '@/types/api'
+import type { DashboardView, ProjectOptionRow, SourceTypeOption, TaskRow, UrgeResult, UserOption } from '@/types/api'
 import type { TableColumn } from '@/components/ui/DataTable.vue'
 import type { SelectOption } from '@/components/ui/AppSelect.vue'
 import { sourceOptions as buildSourceOptions, type SourceOption } from '@/utils/sourceOptions'
+import { projectOptions as buildProjectOptions, projectView, type ProjectOption } from '@/utils/projectOptions'
 
 const toast = useToast()
 
@@ -39,9 +42,11 @@ interface DashboardQueryState {
   owner: number | ''
   source: SourceType | ''
   meeting: number | ''
+  /** 项目筛选：`'<id>'` | `'none'`（未指定项目）| `''`（全部），与任务池/矩阵同键同名 */
+  project: string
 }
 
-const DEFAULTS: DashboardQueryState = { owner: '', source: '', meeting: '' }
+const DEFAULTS: DashboardQueryState = { owner: '', source: '', meeting: '', project: '' }
 const KINDS: QueryKinds<DashboardQueryState> = { owner: 'number', meeting: 'number' }
 
 const { state, apply } = useQuerySync<DashboardQueryState>(DEFAULTS, KINDS)
@@ -67,6 +72,12 @@ const meetingOptions = computed<SelectOption[]>(() => [
 ])
 /** 与任务池/矩阵同口径（AC-5）：启用项按 sort 在前，停用项按 sort 在后并标注（D-02） */
 const sourceOptions = computed<SourceOption[]>(() => buildSourceOptions(sourceTypes.value))
+
+/** 项目下拉同样来自 meta，并走唯一的 projectOptions 投影（含停用与「未指定项目」） */
+const projects = ref<ProjectOptionRow[]>([])
+const projectItems = computed<ProjectOption[]>(() =>
+  buildProjectOptions(projects.value, { allOption: true, includeDisabled: true, includeUnassigned: true }),
+)
 
 const kpis = computed(() => view.value?.kpis ?? null)
 const focusRows = computed<TaskRow[]>(() => view.value?.focus ?? [])
@@ -114,6 +125,7 @@ async function load(): Promise<void> {
     const next = await dashboardApi.load({
       ownerId: state.value.owner === '' ? undefined : state.value.owner,
       sourceType: state.value.source || undefined,
+      project: state.value.project || undefined,
       meetingId: state.value.meeting === '' ? undefined : state.value.meeting,
       focusLimit: limit,
     })
@@ -121,7 +133,14 @@ async function load(): Promise<void> {
     view.value = next
   } catch (err) {
     if (current !== seq) return
-    error.value = toApiError(err)
+    const apiError = toApiError(err)
+    // 手改 URL / 已删项目 → 400：清掉该筛选项重取，不让整页停在错误态（DESIGN §3.7）
+    if (apiError.code === 'PROJECT_INVALID' && state.value.project) {
+      state.value.project = ''
+      toast.warning('项目不合法，已按全部项目展示')
+      return
+    }
+    error.value = apiError
     view.value = null
   } finally {
     if (current === seq) loading.value = false
@@ -135,13 +154,14 @@ onMounted(async () => {
     owners.value = meta.owners
     meetings.value = meta.meetings
     sourceTypes.value = meta.sourceTypes ?? []
+    projects.value = meta.projects ?? []
   } catch {
     /* 选项加载失败只影响筛选下拉，不阻塞看板本体 */
   }
 })
 
 watch(
-  () => [state.value.owner, state.value.source, state.value.meeting],
+  () => [state.value.owner, state.value.source, state.value.meeting, state.value.project],
   () => {
     expanded.value = false
     apply()
@@ -157,6 +177,10 @@ function setSource(value: string): void {
 }
 function setMeeting(value: string): void {
   state.value.meeting = value === '' ? '' : Number(value)
+}
+/** 接受 `''`(全部) / `'none'`(未指定项目) / 数字 id 字符串，非法值交给服务端 400 兜底 */
+function setProject(value: string): void {
+  state.value.project = value ?? ''
 }
 
 function toggleExpand(): void {
@@ -276,6 +300,15 @@ function urgeReason(task: TaskRow): string {
         class="toolbar__select"
         @update:model-value="setSource"
       />
+      <AppSearchSelect
+        :model-value="state.project"
+        :options="projectItems"
+        aria-label="项目筛选"
+        placeholder="全部项目"
+        size="compact"
+        class="toolbar__select"
+        @update:model-value="setProject"
+      />
       <AppSelect
         :model-value="state.meeting === '' ? '' : String(state.meeting)"
         :options="meetingOptions"
@@ -361,15 +394,21 @@ function urgeReason(task: TaskRow): string {
         >
           <template #cell-title="{ row }">
             <RouterLink class="title-link" :to="`/tasks/${asTask(row).id}`">{{ asTask(row).title }}</RouterLink>
-            <SourceTag
-              :code="asTask(row).source.type"
-              :name="asTask(row).source.typeLabel"
-              :color="asTask(row).source.color"
-              :soft-color="asTask(row).source.softColor"
-              :border-color="asTask(row).source.borderColor"
-              :meeting-title="asTask(row).source.meetingTitle"
-              class="title-src"
-            />
+            <div class="title-meta">
+              <SourceTag
+                :code="asTask(row).source.type"
+                :name="asTask(row).source.typeLabel"
+                :color="asTask(row).source.color"
+                :soft-color="asTask(row).source.softColor"
+                :border-color="asTask(row).source.borderColor"
+                :meeting-title="asTask(row).source.meetingTitle"
+                class="title-src"
+              />
+              <!-- 项目位与任务池同源：只由 projectView 决定渲染，空名不渲染（AC-7） -->
+              <span v-if="projectView(asTask(row).source)" class="title-project">
+                <ProjectTag v-bind="projectView(asTask(row).source) ?? {}" />
+              </span>
+            </div>
           </template>
           <template #cell-owner="{ row }">{{ asTask(row).owner.name }}</template>
           <template #cell-due="{ row }">
@@ -569,8 +608,13 @@ function urgeReason(task: TaskRow): string {
   outline-offset: 2px;
   border-radius: var(--r-sm);
 }
-.title-src {
-  margin-left: var(--sp-2);
+/* 来源与项目同处第二行：项目是中性标签，不与来源同色抢注意力（DESIGN §1.2） */
+.title-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-top: 4px;
+  min-width: 0;
 }
 .actions {
   display: flex;

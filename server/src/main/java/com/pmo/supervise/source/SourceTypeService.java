@@ -109,7 +109,10 @@ public class SourceTypeService {
         if (dao.nameExists(name, current.code())) {
             throw nameDuplicate();
         }
-        if (current.form() == SourceForm.NOTE && form == SourceForm.MEETING) {
+        // 改形为会议型（AC-6）：来源下任何「没有会议」的任务都会撞 ck_tasks_source，
+        // 所以前置条件是「原形态不是会议型」，而不是「原形态是说明型」——r4 加入项目型后，
+        // PROJECT→MEETING 若沿用旧条件会绕过检查，把无会议的任务写库并撞 CHECK 变成 500。
+        if (current.form() != SourceForm.MEETING && form == SourceForm.MEETING) {
             long blocking = dao.countTasksWithoutMeeting(current.code());
             if (blocking > 0) {
                 throw new BusinessException(ErrorCode.SOURCE_FORM_CONFLICT,

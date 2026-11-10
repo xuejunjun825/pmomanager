@@ -8,6 +8,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import PageHeader from '@/components/ui/PageHeader.vue'
 import AppSelect from '@/components/ui/AppSelect.vue'
+import AppSearchSelect from '@/components/ui/AppSearchSelect.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import ErrorState from '@/components/ui/ErrorState.vue'
 import SkeletonTable from '@/components/ui/SkeletonTable.vue'
@@ -19,16 +20,19 @@ import { toApiError, type ApiError } from '@/api/http'
 import { useToast } from '@/composables/useToast'
 import { formatNumber, formatPercent } from '@/utils/format'
 import type { MatrixRange, SourceType } from '@/types/enums'
-import type { MatrixRow, MatrixView, SourceTypeOption } from '@/types/api'
+import type { MatrixRow, MatrixView, ProjectOptionRow, SourceTypeOption } from '@/types/api'
 import { sourceOptions as buildSourceOptions, type SourceOption } from '@/utils/sourceOptions'
+import { projectOptions as buildProjectOptions, type ProjectOption } from '@/utils/projectOptions'
 
 interface MatrixQueryState {
   source: SourceType | ''
   range: MatrixRange
   activeOnly: boolean
+  /** 项目筛选：`'<id>'` | `'none'`（未指定项目）| `''`（全部），与任务池同键同名 */
+  project: string
 }
 
-const DEFAULTS: MatrixQueryState = { source: '', range: 'ALL', activeOnly: false }
+const DEFAULTS: MatrixQueryState = { source: '', range: 'ALL', activeOnly: false, project: '' }
 const KINDS: QueryKinds<MatrixQueryState> = { activeOnly: 'boolean' }
 
 const { state, apply } = useQuerySync<MatrixQueryState>(DEFAULTS, KINDS)
@@ -47,6 +51,12 @@ const RANGES: { value: MatrixRange; label: string }[] = [
  */
 const sourceTypes = ref<SourceTypeOption[]>([])
 const sourceOptions = computed<SourceOption[]>(() => buildSourceOptions(sourceTypes.value))
+
+/** 项目下拉与任务池/看板同一投影（含停用与「未指定项目」档），页面不自行排序或拼标签（AC-5） */
+const projects = ref<ProjectOptionRow[]>([])
+const projectItems = computed<ProjectOption[]>(() =>
+  buildProjectOptions(projects.value, { allOption: true, includeDisabled: true, includeUnassigned: true }),
+)
 
 const view = ref<MatrixView | null>(null)
 const loading = ref(false)
@@ -87,6 +97,7 @@ async function load(): Promise<void> {
   try {
     const next = await matrixApi.load({
       sourceType: state.value.source || undefined,
+      project: state.value.project || undefined,
       range: range.value,
       includeDisabled: state.value.activeOnly ? false : true,
     })
@@ -101,6 +112,12 @@ async function load(): Promise<void> {
       toast.warning('来源类型不合法，已按全部来源展示')
       return
     }
+    // 已删/手改 URL 的项目 id → 400：去掉该筛选项重取，不让整页停在错误态（DESIGN §3.7）
+    if (apiError.code === 'PROJECT_INVALID' && state.value.project) {
+      state.value.project = ''
+      toast.warning('项目不合法，已按全部项目展示')
+      return
+    }
     error.value = apiError
     view.value = null
   } finally {
@@ -110,19 +127,20 @@ async function load(): Promise<void> {
 
 onMounted(() => {
   void load()
-  void loadSourceOptions()
+  void loadMeta()
 })
 
-async function loadSourceOptions(): Promise<void> {
+async function loadMeta(): Promise<void> {
   try {
     const meta = await metaApi.options()
     sourceTypes.value = meta.sourceTypes ?? []
+    projects.value = meta.projects ?? []
   } catch {
-    /* 选项加载失败只影响来源下拉，不阻塞矩阵本体 */
+    /* 选项加载失败只影响来源/项目下拉，不阻塞矩阵本体 */
   }
 }
 watch(
-  () => [state.value.source, range.value, state.value.activeOnly],
+  () => [state.value.source, range.value, state.value.activeOnly, state.value.project],
   () => {
     apply()
     void load()
@@ -135,6 +153,11 @@ function setRange(value: MatrixRange): void {
 
 function setSource(value: string): void {
   state.value.source = (value as SourceType | '') ?? ''
+}
+
+/** 接受 `''`(全部) / `'none'`(未指定项目) / 数字 id 字符串，非法值交给服务端 400 兜底 */
+function setProject(value: string): void {
+  state.value.project = value ?? ''
 }
 
 function toggleSort(key: SortKey): void {
@@ -152,7 +175,10 @@ function ariaSort(key: SortKey): 'ascending' | 'descending' | 'none' {
 }
 
 function drillTo(row: MatrixRow, bucket: MatrixBucketKey) {
-  return matrixDrilldown(row, bucket, { sourceType: state.value.source || undefined })
+  return matrixDrilldown(row, bucket, {
+    sourceType: state.value.source || undefined,
+    project: state.value.project || undefined,
+  })
 }
 
 function cellLabel(row: MatrixRow, bucket: MatrixBucketKey): string {
@@ -181,6 +207,15 @@ function ratePercent(rate: number | null): number {
         size="compact"
         class="toolbar__source"
         @update:model-value="setSource"
+      />
+      <AppSearchSelect
+        :model-value="state.project"
+        :options="projectItems"
+        aria-label="项目筛选"
+        placeholder="全部项目"
+        size="compact"
+        class="toolbar__select"
+        @update:model-value="setProject"
       />
       <div class="segmented" role="group" aria-label="统计区间">
         <button
@@ -337,6 +372,10 @@ function ratePercent(rate: number | null): number {
   flex-wrap: wrap;
 }
 .toolbar__source {
+  width: 160px;
+}
+/* 项目下拉与来源同宽，落在同一行（设计 §1.5：来源之后、区间之前） */
+.toolbar__select {
   width: 160px;
 }
 .segmented {

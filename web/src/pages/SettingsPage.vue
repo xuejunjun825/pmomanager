@@ -1,10 +1,11 @@
 <script setup lang="ts">
 /**
- * 系统设置（DESIGN §4.11 / AC-20 / AC-21）。
+ * 系统设置（DESIGN §4.11 / AC-20 / AC-21；r4 增项目配置卡）。
  *
- * 四块卡片：收件人 / 报表开关 / 来源配置 / 钉钉配置状态。
+ * 五块卡片：收件人 / 报表开关 / 来源配置 / 项目配置 / 钉钉配置状态。
  * - 收件人为空是**允许保存**的状态，但必须醒目提示「日报/周报将不会发送」；
- * - 来源配置即时生效（行内操作直接落库），**不参与页面级「未保存变更」拦截**；
+ * - 来源配置与项目配置即时生效（行内操作直接落库），**不参与页面级「未保存变更」拦截**；
+ * - 项目配置是管理员数据：非 ADMIN **整卡不渲染**（不是 disabled 占位），也不发请求；
  * - 钉钉配置只读展示缺失项名称，密钥永不回显，未配置不红色告警；
  * - 保存后重新 GET，以服务端返回为准，不在前端猜 PUT 的响应体。
  */
@@ -16,15 +17,18 @@ import AppInput from '@/components/ui/AppInput.vue'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 import ErrorState from '@/components/ui/ErrorState.vue'
 import PageHeader from '@/components/ui/PageHeader.vue'
+import ProjectConfigTable from '@/components/settings/ProjectConfigTable.vue'
 import SourceTypeTable from '@/components/settings/SourceTypeTable.vue'
+import { projectsApi } from '@/api/projects'
 import { settingsApi } from '@/api/settings'
 import { sourceTypesApi } from '@/api/sourceTypes'
 import { usersApi } from '@/api/users'
 import { toApiError, type ApiError } from '@/api/http'
 import { useToast } from '@/composables/useToast'
+import { useAuthStore } from '@/stores/auth'
 import { formatDateTime } from '@/utils/format'
 import { ROLE_LABELS, type Role } from '@/types/enums'
-import type { SourcePaletteEntry, SourceTypeRow, UserOption } from '@/types/api'
+import type { ProjectRow, SourcePaletteEntry, SourceTypeRow, UserOption } from '@/types/api'
 
 interface Picked {
   id: number
@@ -71,6 +75,13 @@ const sourceTypes = ref<SourceTypeRow[]>([])
 const palette = ref<SourcePaletteEntry[]>([])
 const sourceLoading = ref(true)
 const sourceError = ref('')
+
+/** 项目配置同理：管理员数据，整卡由 isAdmin 控制是否渲染与是否请求 */
+const auth = useAuthStore()
+const isAdmin = computed(() => auth.role === 'ADMIN')
+const projects = ref<ProjectRow[]>([])
+const projectsLoading = ref(false)
+const projectsError = ref('')
 
 const leaveDialog = ref(false)
 let allowLeave = false
@@ -238,6 +249,24 @@ async function loadSources(): Promise<void> {
   }
 }
 
+/** 项目配置：失败只影响本卡（错误提示 + 重试），不拖垮整页；非管理员不请求 */
+async function loadProjects(): Promise<void> {
+  if (!isAdmin.value) {
+    projectsLoading.value = false
+    return
+  }
+  projectsLoading.value = true
+  projectsError.value = ''
+  try {
+    projects.value = await projectsApi.list()
+  } catch (e) {
+    const apiError = toApiError(e)
+    projectsError.value = apiError.message || '项目配置加载失败，请重试。'
+  } finally {
+    projectsLoading.value = false
+  }
+}
+
 watch(dirty, (value) => {
   if (value) window.addEventListener('beforeunload', onBeforeUnload)
   else window.removeEventListener('beforeunload', onBeforeUnload)
@@ -247,6 +276,7 @@ onMounted(() => {
   void load()
   void loadRoster()
   void loadSources()
+  void loadProjects()
 })
 
 onBeforeUnmount(() => {
@@ -264,7 +294,7 @@ onBeforeUnmount(() => {
 
     <div v-if="loading" class="settings__loading" aria-busy="true" aria-live="polite">
       <span class="visually-hidden">正在加载设置</span>
-      <div v-for="n in 4" :key="`sk-${n}`" class="card card--skeleton">
+      <div v-for="n in 5" :key="`sk-${n}`" class="card card--skeleton">
         <span class="sk-block sk-title" />
         <span class="sk-block sk-line" />
         <span class="sk-block sk-line sk-line--short" />
@@ -432,7 +462,25 @@ onBeforeUnmount(() => {
         />
       </section>
 
-      <!-- ④ 钉钉配置状态（只读） -->
+      <!-- ④ 项目配置（即时生效；仅管理员渲染整卡，失败只影响本卡） -->
+      <section v-if="isAdmin" id="projects" class="card" aria-labelledby="projects-title">
+        <header class="card__head card__head--inline">
+          <div>
+            <h2 id="projects-title" class="card__title">项目配置</h2>
+            <p class="card__desc">
+              项目是任务来源的可选绑定对象；行内改动即时生效，无需保存。
+            </p>
+          </div>
+        </header>
+        <ProjectConfigTable
+          :items="projects"
+          :loading="projectsLoading"
+          :error="projectsError"
+          @refresh="loadProjects"
+        />
+      </section>
+
+      <!-- ⑤ 钉钉配置状态（只读） -->
       <section class="card" aria-labelledby="dingtalk-title">
         <header class="card__head card__head--inline">
           <div>

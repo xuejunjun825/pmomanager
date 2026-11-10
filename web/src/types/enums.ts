@@ -46,11 +46,16 @@ export function isFinishedStatus(status: TaskStatus | string | null | undefined)
  */
 export type SourceType = string
 
-/** 来源形态（有限业务枚举，不是可配置数据）：决定建任务时是否需要绑定会议 */
-export type SourceForm = 'MEETING' | 'NOTE'
+/**
+ * 来源形态（有限业务枚举，不是可配置数据）：决定建任务时绑定会议、绑定项目还是自由说明。
+ * `PROJECT` 只在形态层出现，与历史来源编码 `PROJECT`（项目任务）同名不同义：
+ * 判定形态一律读 `source_types.form`，绝不按编码猜（r4 D-01）。
+ */
+export type SourceForm = 'MEETING' | 'PROJECT' | 'NOTE'
 
 export const SOURCE_FORM_LABELS: Record<SourceForm, string> = {
   MEETING: '需绑定会议',
+  PROJECT: '需绑定项目',
   NOTE: '自由说明',
 }
 

@@ -37,6 +37,8 @@ public abstract class IntegrationTestSupport {
         jdbc.execute("DELETE FROM urge_records");
         jdbc.execute("DELETE FROM task_events");
         jdbc.execute("DELETE FROM tasks");
+        // projects 被 tasks.source_project_id 引用（ON DELETE RESTRICT），必须比 tasks 后清。
+        jdbc.execute("DELETE FROM projects");
         jdbc.execute("DELETE FROM decision_items");
         jdbc.execute("DELETE FROM meetings");
         jdbc.execute("DELETE FROM job_runs");

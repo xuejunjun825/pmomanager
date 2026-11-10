@@ -31,6 +31,8 @@ function toParams(filter: TaskFilter): Record<string, string | number> {
   if (filter.status) params.status = filter.status
   if (filter.ownerId !== undefined && filter.ownerId !== '') params.ownerId = filter.ownerId
   if (filter.sourceType) params.sourceType = filter.sourceType
+  // 项目：`'<id>'` / `'none'` / `''`（全部）原样透传，解析只在服务端 ProjectFilterSql
+  if (filter.project) params.project = filter.project
   if (filter.meetingId !== undefined && filter.meetingId !== '') params.meetingId = filter.meetingId
   if (typeof filter.overdue === 'boolean') params.overdue = String(filter.overdue)
   if (filter.keyword && filter.keyword.trim()) params.keyword = filter.keyword.trim()

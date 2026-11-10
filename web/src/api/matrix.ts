@@ -26,6 +26,8 @@ export const MATRIX_BUCKETS: MatrixBucket[] = [
 
 export interface DrillFilter {
   sourceType?: string
+  /** 项目筛选（`'<id>'` / `'none'`）：下钻必须带上，否则格内数字与落页列表对不上（AC-5） */
+  project?: string
 }
 
 export interface DrillTarget {
@@ -67,6 +69,7 @@ export function matrixDrilldown(
       break
   }
   if (filter.sourceType) query.source = filter.sourceType
+  if (filter.project) query.project = filter.project
   return { path: '/tasks', query }
 }
 
@@ -74,6 +77,7 @@ export const matrixApi = {
   load(query: MatrixQuery = {}): Promise<MatrixView> {
     const params: Record<string, string> = { range: query.range ?? 'ALL' }
     if (query.sourceType) params.sourceType = query.sourceType
+    if (query.project) params.project = query.project
     if (typeof query.includeDisabled === 'boolean') params.includeDisabled = String(query.includeDisabled)
     return apiGet<MatrixView>('/matrix', { params })
   },

@@ -184,6 +184,15 @@ export interface TaskSource {
   meetingTitle?: string | null
   decisionItemId?: number | null
   note?: string | null
+  /**
+   * 来源形态（r4）：`PROJECT` 且 `projectId == null` 是「改形历史」，任务行要显示「未指定项目」。
+   * 前端不按来源编码猜形态（编码 `PROJECT` 与形态 `PROJECT` 同名不同义）。
+   */
+  form?: SourceForm | null
+  projectId?: number | null
+  projectName?: string | null
+  /** 三态可空布尔：null = 未知（老接口/夹具），false 才是「已停用」 */
+  projectEnabled?: boolean | null
 }
 
 export interface TaskRow {
@@ -247,6 +256,8 @@ export interface TaskFilter extends PageQuery {
   status?: TaskStatus | ''
   ownerId?: number | ''
   sourceType?: SourceType | ''
+  /** 项目筛选：`'<id>'` | `'none'`（未指定项目） | `''`（全部） */
+  project?: string
   meetingId?: number | ''
   overdue?: boolean | ''
   keyword?: string
@@ -261,6 +272,8 @@ export interface CreateTaskRequest {
   sourceMeetingId?: number | null
   sourceDecisionItemId?: number | null
   sourceNote?: string
+  /** 项目形态必填；其他形态必须为空（服务端单点判定，非项目形态带它会 422） */
+  sourceProjectId?: number | null
   priority?: Priority
 }
 
@@ -339,6 +352,8 @@ export interface MatrixView {
 
 export interface MatrixQuery {
   sourceType?: SourceType | ''
+  /** 项目筛选：与任务池同名同义（`'<id>'` | `'none'` | `''`） */
+  project?: string
   range?: MatrixRange
   includeDisabled?: boolean
 }
@@ -364,6 +379,8 @@ export interface DashboardView {
 export interface DashboardQuery {
   ownerId?: number | ''
   sourceType?: SourceType | ''
+  /** 项目筛选：与任务池/矩阵同名同义 */
+  project?: string
   meetingId?: number | ''
   focusLimit?: number
 }
@@ -438,6 +455,33 @@ export interface SourcePaletteEntry {
   name: string
 }
 
+/* ---------------------------------------------------------------- 项目主数据 */
+
+/** `/api/meta/options` 下发的项目（全员可读，最小字段：不含编码/引用数） */
+export interface ProjectOptionRow {
+  id: number
+  name: string
+  enabled: boolean
+  sort: number
+}
+
+/** 设置页项目表格行（`/api/projects`，仅 ADMIN 可见；usageCount 只在列表出现） */
+export interface ProjectRow {
+  id: number
+  code: string
+  name: string
+  sort: number
+  enabled: boolean
+  usageCount: number
+}
+
+/** 新增 / 编辑项目请求体：编码由服务端生成且创建后不可改，排序留空自动排到末尾 */
+export interface ProjectPayload {
+  name: string
+  sort?: number | null
+  enabled?: boolean
+}
+
 /* ---------------------------------------------------------------- 进度 */
 
 export interface ProgressRow {
@@ -468,6 +512,8 @@ export interface MetaOptions {
   owners: UserOption[]
   meetings: Array<{ id: number; title: string; meetingDate?: string }>
   sourceTypes: SourceTypeOption[]
+  /** 项目不是权限维度：不做角色收窄，全员拿全量（否则历史任务显示不出项目名） */
+  projects: ProjectOptionRow[]
   statuses: Array<{ value: TaskStatus; label: string }>
   priorities: Array<{ value: Priority; label: string }>
 }

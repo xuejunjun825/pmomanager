@@ -1,7 +1,11 @@
 <script setup lang="ts">
 /**
- * 新增 / 编辑来源弹窗（DESIGN §3.2）：480 宽，编码只读、名称 2–10、形态单选、8 色板、排序 0–99。
+ * 新增 / 编辑来源弹窗（DESIGN §3.2、r4 §3.3）：560 宽，编码只读、名称 2–10、形态三选一、8 色板、排序 0–99。
+ * - 形态三态顺序固定：自由说明(NOTE) → 需绑定会议(MEETING) → 需绑定项目(PROJECT)，只认配置里的 form，
+ *   绝不按来源编码猜（编码 PROJECT 与形态 PROJECT 同名不同义，r4 D-01）；
  * - 编码由后端生成，页面只回显；编辑态回传 code 定位，不允许改编码；
+ * - 改形且该来源已被任务使用（usageCount > 0）时，卡片组下方出现「不迁移」提示块 + 必勾确认：
+ *   未勾不可保存，主按钮文案切换为「确认改形并保存」；形态未变或 usage = 0 时不出现；
  * - 409 落在看得见的位置：重名 → 名称字段；形态冲突 → 顶部摘要 + 形态字段；上限 → 顶部摘要；
  * - 关闭不弹二次确认（DESIGN 明确要求直接丢弃草稿）。
  */
@@ -13,7 +17,7 @@ import SourceColorSwatches from './SourceColorSwatches.vue'
 import { sourceTypesApi } from '@/api/sourceTypes'
 import { toApiError } from '@/api/http'
 import type { SourcePaletteEntry, SourceTypePayload, SourceTypeRow } from '@/types/api'
-import type { SourceForm } from '@/types/enums'
+import { SOURCE_FORM_LABELS, type SourceForm } from '@/types/enums'
 
 const props = withDefaults(
   defineProps<{
@@ -28,9 +32,11 @@ const props = withDefaults(
 
 const emit = defineEmits<{ saved: [row: SourceTypeRow]; close: [] }>()
 
-const FORM_OPTIONS: { value: SourceForm; title: string; hint: string }[] = [
-  { value: 'NOTE', title: '自由说明', hint: '建任务时填 1–200 字' },
-  { value: 'MEETING', title: '需绑定会议', hint: '必须选会议与决议项' },
+// 卡片标题统一读 SOURCE_FORM_LABELS，与配置表/筛选/详情同源，避免两处文案漂移
+const FORM_OPTIONS: { value: SourceForm; hint: string }[] = [
+  { value: 'NOTE', hint: '建任务时填 1–200 字' },
+  { value: 'MEETING', hint: '必须选会议与决议项' },
+  { value: 'PROJECT', hint: '必须从项目清单选一个' },
 ]
 
 const MAX_NAME = 10
@@ -42,6 +48,8 @@ const sortValue = ref('')
 const summary = ref('')
 const limitReached = ref(false)
 const saving = ref(false)
+/** 改形影响面必勾确认（仅编辑态、形态变化、且该来源已被任务使用） */
+const changeAck = ref(false)
 const fieldErrors = reactive<{ name?: string; form?: string; color?: string; sort?: string }>({})
 const nameRef = ref<InstanceType<typeof AppInput> | null>(null)
 
@@ -50,6 +58,37 @@ const isEdit = computed(() => props.row !== null && props.row !== undefined)
 const formLocked = computed(() => props.row?.locked === true && props.row.form === 'MEETING')
 /** 按 code point 计数：emoji 与中文都算 1 个字，和输入框 maxlength 的 UTF-16 计数解耦 */
 const nameCount = computed(() => Array.from(name.value.trim()).length)
+
+const originalForm = computed<SourceForm | null>(() => props.row?.form ?? null)
+const usageCount = computed(() => props.row?.usageCount ?? 0)
+/** 形态真的变了才谈改形（改回原形态 = 没有改形，提示与勾选一并消失） */
+const formChanged = computed(() => isEdit.value && originalForm.value !== null && form.value !== originalForm.value)
+const showChangeWarn = computed(() => formChanged.value && usageCount.value > 0)
+const submitLabel = computed(() => (showChangeWarn.value ? '确认改形并保存' : '保存'))
+const canSubmit = computed(() => !limitReached.value && (!showChangeWarn.value || changeAck.value))
+
+/**
+ * 改形影响面文案按「旧形态 → 新形态」分档（DESIGN §3.3）：
+ * 只有 NOTE → PROJECT 会让历史任务落到「未指定项目」；反向改形不会把项目改写成说明文字；
+ * 会议相关的历史任务始终保留原会议绑定，改形只对新建任务生效。
+ */
+const changeWarnText = computed(() => {
+  const from = originalForm.value
+  const count = usageCount.value
+  if (form.value === 'PROJECT' && from === 'NOTE') {
+    return `该来源已有 ${count} 条历史任务，改形后不迁移历史数据；它们没有项目，将显示为「未指定项目」，来源说明照旧保留。`
+  }
+  if (form.value === 'PROJECT' && from === 'MEETING') {
+    return `该来源已有 ${count} 条历史任务，它们仍绑定原会议，不受影响；改形只对新建任务生效，新建时须选择项目。`
+  }
+  if (from === 'PROJECT' && form.value === 'NOTE') {
+    return `该来源已有 ${count} 条历史任务，改形后它们不会转成说明文字，项目照旧展示；改形只对新建任务生效。`
+  }
+  if (from === 'PROJECT' && form.value === 'MEETING') {
+    return `该来源已有 ${count} 条历史任务，它们仍绑定原项目，不受影响；改形只对新建任务生效，新建时须选择会议与决议项。`
+  }
+  return `该来源已有 ${count} 条历史任务，它们仍绑定原会议，不受影响；改形只对新建任务生效。`
+})
 
 function clearErrors(): void {
   fieldErrors.name = undefined
@@ -65,6 +104,7 @@ function seed(): void {
   limitReached.value = false
   clearErrors()
   saving.value = false
+  changeAck.value = false
   if (row) {
     name.value = row.name
     form.value = row.form
@@ -88,6 +128,13 @@ watch(
   },
   { immediate: true },
 )
+
+// 形态再变一次，影响面文案随之改变：已勾的确认不再代表这一次改形，必须重勾
+watch(form, () => {
+  changeAck.value = false
+  // 用户换了形态，服务端上一次的「形态与已建任务冲突」提示不再适用
+  fieldErrors.form = undefined
+})
 
 function close(): void {
   if (saving.value) return
@@ -131,6 +178,8 @@ function applyError(error: ReturnType<typeof toApiError>): void {
 
 async function submit(): Promise<void> {
   if (saving.value || limitReached.value) return
+  // 改形影响面未确认时不可提交（按钮已禁用，这里兜住 Enter 提交）
+  if (showChangeWarn.value && !changeAck.value) return
   summary.value = ''
   clearErrors()
 
@@ -228,13 +277,21 @@ async function submit(): Promise<void> {
               :disabled="formLocked"
             />
             <span class="form-card__body">
-              <span class="form-card__title">{{ option.title }}</span>
+              <span class="form-card__title">{{ SOURCE_FORM_LABELS[option.value] }}</span>
               <span class="form-card__hint">{{ option.hint }}</span>
             </span>
           </label>
         </div>
         <p v-if="formLocked" class="source-form__hint">会议决议一键转任务依赖该形态，不可修改</p>
         <p v-if="fieldErrors.form" class="source-form__error" role="alert">{{ fieldErrors.form }}</p>
+
+        <div v-if="showChangeWarn" class="source-form__warn" role="status">
+          <p class="source-form__warn-text">{{ changeWarnText }}</p>
+          <label class="source-form__ack">
+            <input v-model="changeAck" class="source-form__ack-input" type="checkbox" :disabled="saving" />
+            <span class="source-form__ack-label">我已知悉，历史任务不迁移</span>
+          </label>
+        </div>
       </div>
 
       <div class="source-form__field">
@@ -260,14 +317,23 @@ async function submit(): Promise<void> {
         variant="primary"
         :loading="saving"
         loading-text="保存中…"
-        :disabled="limitReached"
+        :disabled="!canSubmit"
         @click="submit"
       >
-        保存
+        {{ submitLabel }}
       </AppButton>
     </template>
   </Modal>
 </template>
+
+<style>
+/* 宽度认领（r4 §3.3）：Modal 只提供 sm/md/lg 三档定宽（md=480、lg=640），本弹窗需要 560。
+   用 :has 精确认领「内含来源表单」的那一个面板——不新增全局档位、不影响其它弹窗；
+   若浏览器不支持 :has，退回 md 的 480 仍可用（三卡提示文案按 12px 折行不断字）。 */
+.modal__panel:has(> .modal__body > .source-form) {
+  max-width: 560px;
+}
+</style>
 
 <style scoped>
 .source-form {
@@ -350,9 +416,51 @@ async function submit(): Promise<void> {
   color: var(--c-danger-text);
 }
 
+/* 改形影响提示块（DESIGN §1.2）：--r-md + 1px --c-warn-border + --c-warn-soft，正文 13/20 */
+.source-form__warn {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  margin-top: var(--sp-2);
+  padding: 12px;
+  border: 1px solid var(--c-warn-border);
+  border-radius: var(--r-md);
+  background: var(--c-warn-soft);
+}
+.source-form__warn-text {
+  margin: 0;
+  font-size: var(--fs-body-sm);
+  line-height: 20px;
+  color: var(--c-warn);
+}
+.source-form__ack {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  align-self: flex-start;
+  font-size: var(--fs-body-sm);
+  line-height: var(--lh-body-sm);
+  color: var(--c-warn);
+  cursor: pointer;
+}
+.source-form__ack-input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--c-warn);
+  cursor: pointer;
+}
+.source-form__ack-input:focus-visible {
+  outline: 2px solid var(--c-warn);
+  outline-offset: 2px;
+}
+.source-form__ack-input:disabled {
+  cursor: not-allowed;
+}
+
 .form-cards {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: var(--sp-3);
 }
 .form-card {
