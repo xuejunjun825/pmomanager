@@ -3,6 +3,7 @@ package com.pmo.supervise.task;
 import com.pmo.supervise.common.Priority;
 import com.pmo.supervise.common.Role;
 import com.pmo.supervise.common.TaskStatus;
+import com.pmo.supervise.source.SourceForm;
 import com.pmo.supervise.source.SourcePalette;
 import com.pmo.supervise.task.dto.TaskDetailRow;
 import com.pmo.supervise.task.dto.TaskRow;
@@ -92,9 +93,17 @@ public final class TaskRowMapper {
         String code = rs.getString("source_type");
         String name = null;
         String colorHex = null;
+        SourceForm form = null;
+        Long projectId = rs.getObject("source_project_id", Long.class);
+        String projectName = null;
+        Boolean projectEnabled = null;
         try {
             name = rs.getString("source_name");
             colorHex = rs.getString("source_color");
+            form = rs.getString("source_form") == null ? null : SourceForm.of(rs.getString("source_form"));
+            projectName = rs.getString("project_name");
+            // 三态：NULL（项目已删/未 join）不能折成 false，否则前端会把「未知」画成「已停用」。
+            projectEnabled = rs.getObject("project_enabled", Boolean.class);
         } catch (SQLException ignored) {
             // 计数/事件查询不 join 配置表，缺列按兜底处理
         }
@@ -109,6 +118,10 @@ public final class TaskRowMapper {
                 rs.getObject("source_meeting_id", Long.class),
                 rs.getString("meeting_title"),
                 rs.getObject("source_decision_item_id", Long.class),
-                rs.getString("source_note"));
+                rs.getString("source_note"),
+                form,
+                projectId,
+                projectName,
+                projectEnabled);
     }
 }

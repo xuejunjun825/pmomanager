@@ -63,4 +63,76 @@ describe('TaskTable', () => {
     expect(wrapper.text()).toContain('没有符合条件的任务')
     expect(wrapper.text()).toContain('放宽筛选条件后再试')
   })
+
+  /**
+   * r4 / T08：来源列第二行按形态分流（DESIGN §3.8）。
+   * 有项目时不再渲染说明文字；项目型但无项目 = 改形历史，显示「未指定项目」占位。
+   */
+  it('项目型来源：第二行是项目标签（名称 + 停用后缀），不再是会议名 / 说明', () => {
+    const wrapper = mount(TaskTable, {
+      props: {
+        items: [
+          row({
+            source: {
+              type: 'S20001',
+              typeLabel: '客户投诉',
+              form: 'PROJECT',
+              projectId: 12,
+              projectName: '老旧小区改造',
+              projectEnabled: true,
+            },
+          }),
+          row({
+            id: 2,
+            source: {
+              type: 'S20001',
+              typeLabel: '客户投诉',
+              form: 'PROJECT',
+              projectId: 9,
+              projectName: '停用项目',
+              projectEnabled: false,
+            },
+          }),
+        ],
+      },
+    })
+
+    const firstRow = wrapper.findAll('tbody tr')[0]!
+    expect(firstRow.text()).toContain('老旧小区改造')
+    // 项目标签带 128px 截断与 title 全名（只显示色块或编码都算不合格）
+    const tag = firstRow.find('.cell-source__project')
+    expect(tag.exists()).toBe(true)
+    expect(tag.attributes('title')).toBe('老旧小区改造')
+    expect(wrapper.findAll('tbody tr')[1]!.find('.cell-source__project').attributes('title')).toBe(
+      '停用项目（已停用）',
+    )
+  })
+
+  it('改形历史（形态是项目型但没项目）：显示「未指定项目」占位', () => {
+    const wrapper = mount(TaskTable, {
+      props: {
+        items: [
+          row({
+            source: { type: 'S20001', typeLabel: '客户投诉', form: 'PROJECT', projectId: null },
+          }),
+        ],
+      },
+    })
+    const cell = wrapper.findAll('tbody tr')[0]!.findAll('td')[3]!
+    expect(cell.text()).toContain('未指定项目')
+  })
+
+  it('会议 / 说明型来源不渲染任何项目元素（不留空位、不显示「—」）', () => {
+    const wrapper = mount(TaskTable, {
+      props: {
+        items: [
+          row({ source: { type: 'MEETING', meetingId: 2, meetingTitle: '项目周会' } }),
+          row({ id: 3, source: { type: 'NOTE_TYPE', form: 'NOTE', note: '电话转来的投诉' } }),
+        ],
+      },
+    })
+    expect(wrapper.findAll('.cell-source__project')).toHaveLength(0)
+    expect(wrapper.text()).toContain('项目周会')
+    expect(wrapper.text()).toContain('电话转来的投诉')
+  })
 })

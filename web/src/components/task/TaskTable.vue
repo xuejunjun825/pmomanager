@@ -9,9 +9,11 @@ import StatusBadge from '@/components/ui/StatusBadge.vue'
 import OverduePill from '@/components/ui/OverduePill.vue'
 import OwnerChip from '@/components/ui/OwnerChip.vue'
 import SourceTag from '@/components/ui/SourceTag.vue'
+import ProjectTag from '@/components/ui/ProjectTag.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import { formatDate, formatDateTime } from '@/utils/format'
 import { isFinishedStatus } from '@/types/enums'
+import { projectView } from '@/utils/projectOptions'
 import type { TaskRow } from '@/types/api'
 
 const props = withDefaults(
@@ -109,7 +111,17 @@ function isHighlighted(row: TaskRow): boolean {
           :soft-color="asTask(row).source?.softColor"
           :border-color="asTask(row).source?.borderColor"
         />
-        <span class="cell-text cell-source__text" :class="{ 'is-finished': finished(asTask(row)) }">
+        <!-- 第二行：有项目位就渲染项目标签（含「未指定项目」），否则沿用会议名/说明（DESIGN §3.8） -->
+        <ProjectTag
+          v-if="projectView(asTask(row).source)"
+          class="cell-source__project"
+          v-bind="projectView(asTask(row).source) ?? {}"
+        />
+        <span
+          v-else
+          class="cell-text cell-source__text"
+          :class="{ 'is-finished': finished(asTask(row)) }"
+        >
           {{ sourceText(asTask(row)) }}
         </span>
       </span>
@@ -189,13 +201,16 @@ function isHighlighted(row: TaskRow): boolean {
   font-weight: 500;
   color: var(--c-ink-900);
 }
+/* 来源列两行：SourceTag（20）+ 项目标签/来源文本，行高 48 内上下各留 4（DESIGN §3.8） */
 .cell-source {
   display: flex;
-  align-items: center;
-  gap: var(--sp-2);
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
   min-width: 0;
 }
 .cell-source__text {
+  max-width: 100%;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;

@@ -2,6 +2,9 @@ package com.pmo.supervise.task;
 
 import com.pmo.supervise.common.BusinessException;
 import com.pmo.supervise.common.ErrorCode;
+import com.pmo.supervise.project.ProjectDao;
+import com.pmo.supervise.project.ProjectFilterSql;
+import com.pmo.supervise.project.ProjectService;
 import com.pmo.supervise.source.SourceForm;
 import com.pmo.supervise.source.SourceTypeDao;
 import com.pmo.supervise.source.SourceTypeService;
@@ -24,7 +27,16 @@ class TaskQueryBuilderTest {
                     SourceForm.MEETING, "#1B4D8F", 0, true);
         }
     };
-    private final TaskQueryBuilder builder = new TaskQueryBuilder(sourceTypes);
+    private final ProjectFilterSql projectFilter = new ProjectFilterSql(new ProjectService(null, null) {
+        @Override
+        public ProjectDao.ProjectRow requireKnown(long id) {
+            if (id != 12L) {
+                throw new BusinessException(ErrorCode.PROJECT_INVALID, "项目不存在或已删除");
+            }
+            return new ProjectDao.ProjectRow(12L, "P00012", "智能工厂", 0, true);
+        }
+    });
+    private final TaskQueryBuilder builder = new TaskQueryBuilder(sourceTypes, projectFilter);
     private final LocalDate today = LocalDate.of(2026, 11, 9);
 
     @Test
@@ -70,6 +82,55 @@ class TaskQueryBuilderTest {
         TaskFilter filter = new TaskFilter();
         filter.setOverdue(false);
         assertThat(builder.build(filter, today).where()).contains("AND NOT " + TaskSql.OVERDUE);
+    }
+
+    @Test
+    void emptyProjectFilterLeavesWhereUntouched() {
+        TaskFilter filter = new TaskFilter();
+        filter.setProject("  ");
+        assertThat(builder.build(filter, today).where()).isEqualTo(" WHERE 1 = 1");
+    }
+
+    @Test
+    void projectIdBecomesNamedParameter() {
+        TaskFilter filter = new TaskFilter();
+        filter.setProject("12");
+        TaskQueryBuilder.TaskQuery query = builder.build(filter, today);
+        assertThat(query.where()).contains("t.source_project_id = :projectId");
+        assertThat(query.params()).containsEntry("projectId", 12L);
+    }
+
+    @Test
+    void unassignedProjectMatchesOnlyProjectFormWithoutProject() {
+        TaskFilter filter = new TaskFilter();
+        filter.setProject(ProjectFilterSql.UNASSIGNED);
+        TaskQueryBuilder.TaskQuery query = builder.build(filter, today);
+        assertThat(query.where())
+                .contains("t.source_project_id IS NULL")
+                .contains("s.form = 'PROJECT'");
+        assertThat(query.params()).doesNotContainKey("projectId");
+    }
+
+    @Test
+    void unknownProjectIdIs400() {
+        TaskFilter filter = new TaskFilter();
+        filter.setProject("999");
+        assertThatThrownBy(() -> builder.build(filter, today))
+                .isInstanceOf(BusinessException.class)
+                .satisfies(ex -> assertThat(((BusinessException) ex).code()).isEqualTo(ErrorCode.PROJECT_INVALID));
+    }
+
+    @Test
+    void projectSitsBetweenSourceTypeAndMeeting() {
+        TaskFilter filter = new TaskFilter();
+        filter.setSourceType("meeting");
+        filter.setProject("12");
+        filter.setMeetingId(3L);
+        String where = builder.build(filter, today).where();
+        assertThat(where.indexOf("t.source_type = :sourceType"))
+                .isLessThan(where.indexOf("t.source_project_id = :projectId"));
+        assertThat(where.indexOf("t.source_project_id = :projectId"))
+                .isLessThan(where.indexOf("t.source_meeting_id = :meetingId"));
     }
 
     @Test

@@ -13,6 +13,8 @@ public class TaskFilter {
     private String status;
     private Long ownerId;
     private String sourceType;
+    /** 项目筛选：项目 id，或 {@code none} 取「来源形态为项目型但任务无项目」的历史任务。 */
+    private String project;
     private Long meetingId;
     private Boolean overdue;
     private String keyword;
@@ -51,6 +53,14 @@ public class TaskFilter {
 
     public void setSourceType(String sourceType) {
         this.sourceType = sourceType;
+    }
+
+    public String getProject() {
+        return project;
+    }
+
+    public void setProject(String project) {
+        this.project = project;
     }
 
     public Long getMeetingId() {

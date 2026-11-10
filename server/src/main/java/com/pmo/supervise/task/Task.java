@@ -45,6 +45,10 @@ public class Task {
     @Column(name = "source_note", length = 200)
     private String sourceNote;
 
+    /** 项目型来源绑定的项目（r4）；其它形态恒为 null，互斥由 ck_tasks_source 兜底。 */
+    @Column(name = "source_project_id")
+    private Long sourceProjectId;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 16)
     private TaskStatus status = TaskStatus.PENDING;
@@ -139,6 +143,14 @@ public class Task {
 
     public void setSourceNote(String sourceNote) {
         this.sourceNote = sourceNote;
+    }
+
+    public Long getSourceProjectId() {
+        return sourceProjectId;
+    }
+
+    public void setSourceProjectId(Long sourceProjectId) {
+        this.sourceProjectId = sourceProjectId;
     }
 
     public TaskStatus getStatus() {

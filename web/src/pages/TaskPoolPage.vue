@@ -21,7 +21,8 @@ import { toApiError, type ApiError } from '@/api/http'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import type { SourceType, TaskStatus } from '@/types/enums'
-import type { MetaOptions, TaskDetail, TaskFilter, TaskRow, UserOption } from '@/types/api'
+import type { MetaOptions, ProjectOptionRow, TaskDetail, TaskFilter, TaskRow, UserOption } from '@/types/api'
+import { UNASSIGNED_VALUE } from '@/utils/projectOptions'
 
 const router = useRouter()
 const auth = useAuthStore()
@@ -33,6 +34,8 @@ interface PoolQuery {
   status: TaskStatus | ''
   owner: number | ''
   source: SourceType | ''
+  /** 项目筛选（DESIGN §3.7）：`'<id>'` | `'none'`（未指定项目）| `''`（全部），故按字符串存 */
+  project: string
   meeting: number | ''
   overdue: boolean | ''
   q: string
@@ -43,6 +46,7 @@ const DEFAULTS: PoolQuery = {
   status: '',
   owner: '',
   source: '',
+  project: '',
   meeting: '',
   overdue: '',
   q: '',
@@ -77,12 +81,17 @@ const meetings = computed(() => (Array.isArray(meta.value?.meetings) ? meta.valu
 const sourceTypes = computed(() =>
   Array.isArray(meta.value?.sourceTypes) ? meta.value!.sourceTypes : [],
 )
+/** 项目同样取 meta 全量（含已停用）：停用项目仍要能筛历史任务，抽屉自己再收窄 */
+const projects = computed<ProjectOptionRow[]>(() =>
+  Array.isArray(meta.value?.projects) ? meta.value!.projects : [],
+)
 
 /** 筛选条与 URL 状态之间的唯一映射（URL 用短键，符合 DESIGN 的可分享形状） */
 const filters = computed<PoolFilters>(() => ({
   status: state.value.status,
   ownerId: state.value.owner,
   sourceType: state.value.source,
+  project: state.value.project,
   meetingId: state.value.meeting,
   overdue: state.value.overdue,
   keyword: state.value.q,
@@ -93,6 +102,7 @@ const hasFilters = computed(
     Boolean(state.value.status) ||
     state.value.owner !== '' ||
     Boolean(state.value.source) ||
+    Boolean(state.value.project) ||
     state.value.meeting !== '' ||
     state.value.overdue !== '' ||
     state.value.q.trim() !== '',
@@ -103,6 +113,8 @@ function buildFilter(): TaskFilter {
     status: state.value.status || undefined,
     ownerId: state.value.owner === '' ? undefined : state.value.owner,
     sourceType: state.value.source || undefined,
+    // `'none'` 也原样下发：服务端把哨兵解释成「形态是项目型但无项目」（AC-5）
+    project: state.value.project || undefined,
     meetingId: state.value.meeting === '' ? undefined : state.value.meeting,
     overdue: state.value.overdue === '' ? undefined : state.value.overdue,
     keyword: state.value.q.trim() || undefined,
@@ -130,6 +142,12 @@ async function load(): Promise<void> {
     if (apiError.code === 'SOURCE_TYPE_INVALID' && state.value.source) {
       state.value.source = ''
       toast.warning('来源类型不合法，已按全部来源展示')
+      return
+    }
+    // 同上：`?project=999` / 已删项目 → 400，清空项目条件重取，不停在错误态（AC-5）
+    if (apiError.code === 'PROJECT_INVALID' && state.value.project) {
+      state.value.project = ''
+      toast.warning('项目筛选已失效，已按全部项目展示')
       return
     }
     error.value = apiError
@@ -169,6 +187,7 @@ function onFilters(next: PoolFilters): void {
   state.value.status = next.status
   state.value.owner = next.ownerId
   state.value.source = next.sourceType
+  state.value.project = next.project
   state.value.meeting = next.meetingId
   state.value.overdue = next.overdue
   state.value.q = next.keyword
@@ -179,11 +198,30 @@ function clearFilters(): void {
   state.value.status = ''
   state.value.owner = ''
   state.value.source = ''
+  state.value.project = ''
   state.value.meeting = ''
   state.value.overdue = ''
   state.value.q = ''
   state.value.page = 1
 }
+
+/** 只清项目条件（空态按钮「清除项目筛选」用）：其余筛选保持不动 */
+function clearProjectFilter(): void {
+  state.value.project = ''
+  state.value.page = 1
+}
+
+/** 项目筛选下为空时给专用空态（DESIGN §1.4），否则沿用通用文案 */
+const emptyTitle = computed(() => {
+  if (state.value.project) {
+    return state.value.project === UNASSIGNED_VALUE ? '未指定项目下暂无任务' : '该项目下暂无任务'
+  }
+  return hasFilters.value ? '没有符合条件的任务' : '任务池还是空的'
+})
+const emptyHint = computed(() => {
+  if (state.value.project) return '换一个项目，或清除项目筛选'
+  return hasFilters.value ? '放宽或清除筛选条件后再看' : '从会议决议转任务，或直接新建一条'
+})
 
 function changePage(page: number): void {
   state.value.page = Math.max(1, page)
@@ -245,6 +283,7 @@ onBeforeUnmount(() => {
       :owners="owners"
       :meetings="meetings"
       :source-types="sourceTypes"
+      :projects="projects"
       :loading="loading"
       @update:model-value="onFilters"
     />
@@ -274,17 +313,26 @@ onBeforeUnmount(() => {
           :items="items"
           :loading="loading"
           :highlight-id="highlightId"
-          :empty-title="hasFilters ? '没有符合条件的任务' : '任务池还是空的'"
-          :empty-hint="hasFilters ? '放宽或清除筛选条件后再看' : '从会议决议转任务，或直接新建一条'"
+          :empty-title="emptyTitle"
+          :empty-hint="emptyHint"
           @row-click="openRow"
         >
           <template #empty>
-            <EmptyState
-              :title="hasFilters ? '没有符合条件的任务' : '任务池还是空的'"
-              :description="hasFilters ? '放宽或清除筛选条件后再看' : '从会议决议转任务，或直接新建一条'"
-              size="sm"
-            >
-              <AppButton v-if="hasFilters" variant="secondary" size="compact" @click="clearFilters">
+            <EmptyState :title="emptyTitle" :description="emptyHint" size="sm">
+              <AppButton
+                v-if="state.project"
+                variant="secondary"
+                size="compact"
+                @click="clearProjectFilter"
+              >
+                清除项目筛选
+              </AppButton>
+              <AppButton
+                v-else-if="hasFilters"
+                variant="secondary"
+                size="compact"
+                @click="clearFilters"
+              >
                 清除筛选
               </AppButton>
             </EmptyState>
@@ -308,6 +356,7 @@ onBeforeUnmount(() => {
       :owners="owners"
       :meetings="meetings"
       :source-types="sourceTypes"
+      :projects="projects"
       @close="drawerOpen = false"
       @saved="onCreated"
     />

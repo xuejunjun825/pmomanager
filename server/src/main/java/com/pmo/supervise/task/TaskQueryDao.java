@@ -28,8 +28,11 @@ public class TaskQueryDao {
     private static final String SELECT_BASE = """
             SELECT t.id, t.title, t.owner_id, u.name AS owner_name, u.role AS owner_role,
                    t.due_date, t.source_type, st.name AS source_name, st.color AS source_color,
+                   st.form AS source_form,
                    t.source_meeting_id, m.title AS meeting_title,
-                   t.source_decision_item_id, t.source_note, t.status, t.priority,
+                   t.source_decision_item_id, t.source_note,
+                   t.source_project_id, p.name AS project_name, p.enabled AS project_enabled,
+                   t.status, t.priority,
                    t.dispatcher_id, d.name AS dispatcher_name, d.role AS dispatcher_role,
                    t.completion_note, t.completion_url, t.submitted_at, t.completed_at,
                    t.created_at, t.updated_at,
@@ -43,6 +46,7 @@ public class TaskQueryDao {
             JOIN users d ON d.id = t.dispatcher_id
             LEFT JOIN meetings m ON m.id = t.source_meeting_id
             LEFT JOIN source_types st ON st.code = t.source_type
+            LEFT JOIN projects p ON p.id = t.source_project_id
             """.formatted(TaskSql.OVERDUE, TaskSql.OVERDUE, TaskSql.DUE_SOON);
 
     private static final String COUNT_BASE = """

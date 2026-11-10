@@ -29,9 +29,13 @@ public record UpdateTaskRequest(
 
         Long sourceMeetingId,
 
-        Long sourceDecisionItemId) {
+        Long sourceDecisionItemId,
+
+        /** 改来源同样非法：出现即 TASK_SOURCE_IMMUTABLE（含把项目加/换到已建任务上）。 */
+        Long sourceProjectId) {
 
     public boolean hasSourceFields() {
-        return sourceType != null || sourceMeetingId != null || sourceDecisionItemId != null;
+        return sourceType != null || sourceMeetingId != null || sourceDecisionItemId != null
+                || sourceProjectId != null;
     }
 }

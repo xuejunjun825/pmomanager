@@ -5,17 +5,25 @@
  */
 import { computed } from 'vue'
 import AppInput from '@/components/ui/AppInput.vue'
+import AppSearchSelect from '@/components/ui/AppSearchSelect.vue'
 import AppSelect from '@/components/ui/AppSelect.vue'
 import AppButton from '@/components/ui/AppButton.vue'
 import type { SourceType, TaskStatus } from '@/types/enums'
 import { TASK_STATUS_LABELS } from '@/types/enums'
-import type { SourceTypeOption, UserOption } from '@/types/api'
+import type { ProjectOptionRow, SourceTypeOption, UserOption } from '@/types/api'
 import { sourceOptions as buildSourceOptions } from '@/utils/sourceOptions'
+import {
+  UNASSIGNED_VALUE,
+  projectOptions as buildProjectOptions,
+  type ProjectOption,
+} from '@/utils/projectOptions'
 
 export interface PoolFilters {
   status: TaskStatus | ''
   ownerId: number | ''
   sourceType: SourceType | ''
+  /** `'<id>'` | `'none'`（未指定项目）| `''`（全部）—— 与 URL 短键 `project` 同值域 */
+  project: string
   meetingId: number | ''
   overdue: boolean | ''
   keyword: string
@@ -28,9 +36,11 @@ const props = withDefaults(
     meetings: Array<{ id: number; title: string }>
     /** meta.sourceTypes 全量（含已停用）：停用来源仍要能筛历史任务（AC-5） */
     sourceTypes?: SourceTypeOption[]
+    /** meta.projects 全量（含已停用）：停用项目仍要能筛历史任务（AC-5） */
+    projects?: ProjectOptionRow[]
     loading?: boolean
   }>(),
-  { sourceTypes: () => [], loading: false },
+  { sourceTypes: () => [], projects: () => [], loading: false },
 )
 
 const emit = defineEmits<{ 'update:modelValue': [value: PoolFilters] }>()
@@ -48,6 +58,18 @@ const STATUS_OPTIONS = [
  * 停用来源仍要能筛出历史任务，不得因为停用把选项删掉。
  */
 const sourceOptions = computed(() => buildSourceOptions(props.sourceTypes))
+
+/**
+ * 项目筛选的选项来自唯一投影（AC-5）：含停用项与「未指定项目」档，
+ * 与矩阵 / 看板同一函数同一参数，页面不得自己过滤停用项或拼标签。
+ */
+const projectItems = computed<ProjectOption[]>(() =>
+  buildProjectOptions(props.projects, {
+    allOption: true,
+    includeDisabled: true,
+    includeUnassigned: true,
+  }),
+)
 
 const OVERDUE_OPTIONS = [
   { label: '是否逾期', value: '' },
@@ -104,6 +126,12 @@ const chips = computed<Chip[]>(() => {
     const source = props.sourceTypes.find((item) => item.value === filter.sourceType)
     list.push({ key: 'sourceType', label: source ? source.label : filter.sourceType })
   }
+  if (filter.project) {
+    // chip 文案直接取投影后的选项（停用后缀只有一处），不再拼第二份文案
+    const project = projectItems.value.find((item) => item.value === filter.project)
+    const fallback = filter.project === UNASSIGNED_VALUE ? '未指定项目' : `项目 #${filter.project}`
+    list.push({ key: 'project', label: `项目：${project?.label ?? fallback}` })
+  }
   if (filter.meetingId !== '') {
     const meeting = props.meetings.find((item) => item.id === filter.meetingId)
     list.push({ key: 'meetingId', label: meeting ? meeting.title : `会议 #${filter.meetingId}` })
@@ -118,6 +146,7 @@ function removeChip(key: keyof PoolFilters): void {
   else if (key === 'overdue') patch({ overdue: '' })
   else if (key === 'status') patch({ status: '' })
   else if (key === 'sourceType') patch({ sourceType: '' })
+  else if (key === 'project') patch({ project: '' })
   else if (key === 'ownerId') patch({ ownerId: '' })
   else patch({ meetingId: '' })
 }
@@ -127,6 +156,7 @@ function clearAll(): void {
     status: '',
     ownerId: '',
     sourceType: '',
+    project: '',
     meetingId: '',
     overdue: '',
     keyword: '',
@@ -166,6 +196,16 @@ function clearAll(): void {
         size="compact"
         aria-label="来源类型筛选"
         @update:model-value="patch({ sourceType: $event as SourceType | '' })"
+      />
+      <!-- 项目从属于来源：紧邻来源位之后、会议之前（DESIGN §3.7），宽 148 与其他控件同高 -->
+      <AppSearchSelect
+        class="filter__project"
+        :model-value="modelValue.project"
+        :options="projectItems"
+        size="compact"
+        aria-label="项目筛选"
+        empty-text="没有匹配的项目"
+        @update:model-value="patch({ project: $event })"
       />
       <AppSelect
         :model-value="modelValue.meetingId"
@@ -214,6 +254,11 @@ function clearAll(): void {
 }
 .filter__search {
   width: 240px;
+}
+/* 筛选行合计 966 ≤ 1008（DESIGN §1.6 几何表）：项目位固定 148，不参与伸缩 */
+.filter__project {
+  width: 148px;
+  flex: none;
 }
 .filter__chips {
   display: flex;

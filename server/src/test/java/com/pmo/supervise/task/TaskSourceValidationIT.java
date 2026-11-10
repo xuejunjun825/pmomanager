@@ -43,8 +43,13 @@ class TaskSourceValidationIT extends IntegrationTestSupport {
 
     private CreateTaskRequest request(String title, String sourceType, Long meetingId,
                                       Long decisionItemId, String note) {
+        return request(title, sourceType, meetingId, decisionItemId, note, null);
+    }
+
+    private CreateTaskRequest request(String title, String sourceType, Long meetingId,
+                                      Long decisionItemId, String note, Long projectId) {
         return new CreateTaskRequest(title, owner, LocalDate.of(2026, 11, 20), sourceType,
-                meetingId, decisionItemId, note, Priority.MEDIUM);
+                meetingId, decisionItemId, note, Priority.MEDIUM, projectId);
     }
 
     @Test
@@ -146,7 +151,7 @@ class TaskSourceValidationIT extends IntegrationTestSupport {
 
         assertThatThrownBy(() -> taskService.update(taskId, admin,
                 new com.pmo.supervise.task.dto.UpdateTaskRequest(
-                        "改来源", null, null, null, null, "PROJECT", null, null), today))
+                        "改来源", null, null, null, null, "PROJECT", null, null, null), today))
                 .isInstanceOfSatisfying(BusinessException.class,
                         ex -> assertThat(ex.code()).isEqualTo(ErrorCode.TASK_SOURCE_IMMUTABLE));
     }

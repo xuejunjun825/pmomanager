@@ -47,7 +47,7 @@ class TaskServiceIT extends IntegrationTestSupport {
     void createMeetingTask() {
         TaskDetailRow detail = taskService.create(actor(adminId), new CreateTaskRequest(
                 "输出周会纪要", ownerId, due, SourceCodes.MEETING, meetingId, decisionItemId, null,
-                Priority.HIGH), clock.today());
+                Priority.HIGH, null), clock.today());
 
         assertThat(detail.source().type()).isEqualTo(SourceCodes.MEETING);
         assertThat(detail.source().meetingTitle()).isEqualTo("产品周会");
@@ -61,7 +61,7 @@ class TaskServiceIT extends IntegrationTestSupport {
     @DisplayName("会议来源缺会议或决议项 → 422 且 fieldErrors 指名")
     void meetingSourceRequiresBothIds() {
         assertThatThrownBy(() -> taskService.create(actor(adminId), new CreateTaskRequest(
-                "缺会议", ownerId, due, SourceCodes.MEETING, null, null, null, null), clock.today()))
+                "缺会议", ownerId, due, SourceCodes.MEETING, null, null, null, null, null), clock.today()))
                 .isInstanceOf(BusinessException.class)
                 .satisfies(ex -> {
                     BusinessException be = (BusinessException) ex;
@@ -75,13 +75,13 @@ class TaskServiceIT extends IntegrationTestSupport {
     @DisplayName("非会议来源必须写说明且不得带会议字段")
     void projectSourceNeedsNote() {
         assertThatThrownBy(() -> taskService.create(actor(adminId), new CreateTaskRequest(
-                "没有来源", ownerId, due, "PROJECT", null, null, null, null), clock.today()))
+                "没有来源", ownerId, due, "PROJECT", null, null, null, null, null), clock.today()))
                 .isInstanceOf(BusinessException.class)
                 .satisfies(ex -> assertThat(((BusinessException) ex).fieldErrors())
                         .extracting(f -> f.field()).contains("sourceNote"));
 
         assertThatThrownBy(() -> taskService.create(actor(adminId), new CreateTaskRequest(
-                "来源冲突", ownerId, due, "PROJECT", meetingId, null, "说明", null), clock.today()))
+                "来源冲突", ownerId, due, "PROJECT", meetingId, null, "说明", null, null), clock.today()))
                 .isInstanceOf(BusinessException.class)
                 .satisfies(ex -> assertThat(((BusinessException) ex).fieldErrors())
                         .extracting(f -> f.field()).contains("sourceMeetingId"));
@@ -91,10 +91,12 @@ class TaskServiceIT extends IntegrationTestSupport {
     @DisplayName("同一决议项不能转出两条任务（uk_tasks_decision）")
     void decisionItemCanOnlyConvertOnce() {
         taskService.create(actor(adminId), new CreateTaskRequest(
-                "输出周会纪要", ownerId, due, SourceCodes.MEETING, meetingId, decisionItemId, null, null), clock.today());
+                "输出周会纪要", ownerId, due, SourceCodes.MEETING, meetingId, decisionItemId, null, null, null),
+                clock.today());
 
         assertThatThrownBy(() -> taskService.create(actor(adminId), new CreateTaskRequest(
-                "重复转任务", ownerId, due, SourceCodes.MEETING, meetingId, decisionItemId, null, null), clock.today()))
+                "重复转任务", ownerId, due, SourceCodes.MEETING, meetingId, decisionItemId, null, null, null),
+                clock.today()))
                 .isInstanceOf(BusinessException.class)
                 .satisfies(ex -> assertThat(((BusinessException) ex).fieldErrors())
                         .extracting(f -> f.field()).contains("sourceDecisionItemId"));
@@ -106,7 +108,7 @@ class TaskServiceIT extends IntegrationTestSupport {
         long disabled = seedUser("svc-disabled", "停用人", com.pmo.supervise.common.Role.OWNER, "DISABLED");
 
         assertThatThrownBy(() -> taskService.create(actor(adminId), new CreateTaskRequest(
-                "派给停用人", disabled, due, "DAILY", null, null, "日常待办", null), clock.today()))
+                "派给停用人", disabled, due, "DAILY", null, null, "日常待办", null, null), clock.today()))
                 .isInstanceOf(BusinessException.class)
                 .satisfies(ex -> assertThat(((BusinessException) ex).fieldErrors())
                         .extracting(f -> f.field()).contains("ownerId"));
@@ -116,17 +118,18 @@ class TaskServiceIT extends IntegrationTestSupport {
     @DisplayName("来源字段不可修改；改人改期必须走改派/改期")
     void sourceIsImmutable() {
         TaskDetailRow detail = taskService.create(actor(adminId), new CreateTaskRequest(
-                "日常任务", ownerId, due, "DAILY", null, null, "晨会安排", null), clock.today());
+                "日常任务", ownerId, due, "DAILY", null, null, "晨会安排", null, null), clock.today());
 
         assertThatThrownBy(() -> taskService.update(detail.id(), actor(adminId),
-                new UpdateTaskRequest("改来源", null, null, null, "新说明", "PROJECT", null, null),
+                new UpdateTaskRequest("改来源", null, null, null, "新说明", "PROJECT", null, null, null),
                 clock.today()))
                 .isInstanceOf(BusinessException.class)
                 .satisfies(ex -> assertThat(((BusinessException) ex).code())
                         .isEqualTo(ErrorCode.TASK_SOURCE_IMMUTABLE));
 
         assertThatThrownBy(() -> taskService.update(detail.id(), actor(adminId),
-                new UpdateTaskRequest("改人", otherOwnerId, null, null, null, null, null, null), clock.today()))
+                new UpdateTaskRequest("改人", otherOwnerId, null, null, null, null, null, null, null),
+                clock.today()))
                 .isInstanceOf(BusinessException.class)
                 .satisfies(ex -> assertThat(((BusinessException) ex).fieldErrors())
                         .extracting(f -> f.field()).contains("ownerId"));
@@ -136,7 +139,7 @@ class TaskServiceIT extends IntegrationTestSupport {
     @DisplayName("owner 只能看自己的任务，越界 404")
     void ownerCannotViewOthersTask() {
         TaskDetailRow detail = taskService.create(actor(adminId), new CreateTaskRequest(
-                "只属于甲", ownerId, due, "DAILY", null, null, "晨会安排", null), clock.today());
+                "只属于甲", ownerId, due, "DAILY", null, null, "晨会安排", null, null), clock.today());
 
         assertThat(taskService.get(detail.id(), actor(ownerId), clock.today()).id()).isEqualTo(detail.id());
 
@@ -149,7 +152,7 @@ class TaskServiceIT extends IntegrationTestSupport {
     @DisplayName("permissions 由服务端按角色与状态计算")
     void permissionsAreComputedServerSide() {
         TaskDetailRow detail = taskService.create(actor(adminId), new CreateTaskRequest(
-                "权限检查", ownerId, due, "DAILY", null, null, "晨会安排", null), clock.today());
+                "权限检查", ownerId, due, "DAILY", null, null, "晨会安排", null, null), clock.today());
 
         TaskPermissions owner = taskService.permissions(taskService.require(detail.id()), actor(ownerId));
         assertThat(owner.canStart()).isTrue();

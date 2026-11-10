@@ -1,11 +1,13 @@
 package com.pmo.supervise.task;
 
 import com.pmo.supervise.common.Actor;
+import com.pmo.supervise.common.ApiError;
 import com.pmo.supervise.common.BusinessException;
 import com.pmo.supervise.common.ErrorCode;
 import com.pmo.supervise.common.Priority;
 import com.pmo.supervise.common.Role;
 import com.pmo.supervise.common.TaskStatus;
+import com.pmo.supervise.project.ProjectService;
 import com.pmo.supervise.source.SourceForm;
 import com.pmo.supervise.source.SourceTypeDao.SourceTypeConfig;
 import com.pmo.supervise.source.SourceTypeService;
@@ -20,6 +22,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -36,15 +39,17 @@ public class TaskService {
     private final TaskAccessGuard guard;
     private final JdbcTemplate jdbc;
     private final SourceTypeService sourceTypes;
+    private final ProjectService projects;
 
     public TaskService(TaskRepository taskRepository, TaskQueryDao queryDao,
                        TaskAccessGuard guard, JdbcTemplate jdbc,
-                       SourceTypeService sourceTypes) {
+                       SourceTypeService sourceTypes, ProjectService projects) {
         this.taskRepository = taskRepository;
         this.queryDao = queryDao;
         this.guard = guard;
         this.jdbc = jdbc;
         this.sourceTypes = sourceTypes;
+        this.projects = projects;
     }
 
     @Transactional
@@ -53,14 +58,18 @@ public class TaskService {
         validateOwner(req.ownerId());
         SourceTypeConfig source = validateSource(req);
 
+        // 按形态归一：每条任务只落一组来源字段，形态之外的一律写 null（库层 CHECK 兜底）。
+        boolean meetingForm = source.form() == SourceForm.MEETING;
+        boolean projectForm = source.form() == SourceForm.PROJECT;
         Task task = new Task();
         task.setTitle(req.title().trim());
         task.setOwnerId(req.ownerId());
         task.setDueDate(req.dueDate());
         task.setSourceType(source.code());
-        task.setSourceMeetingId(req.sourceMeetingId());
-        task.setSourceDecisionItemId(req.sourceDecisionItemId());
-        task.setSourceNote(req.sourceNote() == null || req.sourceNote().isBlank() ? null : req.sourceNote().trim());
+        task.setSourceMeetingId(meetingForm ? req.sourceMeetingId() : null);
+        task.setSourceDecisionItemId(meetingForm ? req.sourceDecisionItemId() : null);
+        task.setSourceNote(meetingForm || projectForm ? null : trimToNull(req.sourceNote()));
+        task.setSourceProjectId(projectForm ? req.sourceProjectId() : null);
         task.setStatus(TaskStatus.PENDING);
         task.setDispatcherId(actor.id());
         task.setPriority(req.priority() == null ? Priority.MEDIUM : req.priority());
@@ -183,25 +192,61 @@ public class TaskService {
     }
 
     /**
-     * 来源校验（TECHNICAL §4.2）：形态由配置驱动——MEETING 绑会议与决议项，NOTE 填自由说明。
-     * 编码必须存在且启用，形态规则只在这一次判断，库层 CHECK 只兜结构互斥。
+     * 来源校验（TECHNICAL §3.4）：形态由配置驱动——MEETING 绑会议与决议项、PROJECT 绑项目、
+     * NOTE 填自由说明。编码必须存在且启用；三组的互斥只在这一个方法判定，库层 CHECK 兜底。
+     *
+     * <p>项目形态的错误顺序写死为「① 结构冲突 400 → ② 缺选 422 → ③ 停用/已删 400」，
+     * 两者同时出现时先报结构冲突，IT 用例才可稳定复现 PRD 的 400 文案。
      */
     private SourceTypeConfig validateSource(CreateTaskRequest req) {
         SourceTypeConfig config = sourceTypes.requireEnabled(req.sourceType());
         Map<String, String> fields = new LinkedHashMap<>();
+
         if (config.form() == SourceForm.MEETING) {
             if (req.sourceMeetingId() == null) {
-                fields.put("sourceMeetingId", "会议来源必须选择会议");
+                fields.put("sourceMeetingId", "请选择来源会议");
             }
             if (req.sourceDecisionItemId() == null) {
-                fields.put("sourceDecisionItemId", "会议来源必须选择决议项");
+                fields.put("sourceDecisionItemId", "请选择关联决议项");
             }
-            if (req.sourceNote() != null && !req.sourceNote().isBlank()) {
-                fields.put("sourceNote", "会议来源不需要填写说明");
+            if (hasText(req.sourceNote())) {
+                fields.put("sourceNote", "会议来源不能填写说明");
             }
-        } else {
-            if (req.sourceNote() == null || req.sourceNote().isBlank()) {
-                fields.put("sourceNote", "请填写来源说明");
+            if (req.sourceProjectId() != null) {
+                fields.put("sourceProjectId", "非项目来源不能关联项目");
+            }
+            if (!fields.isEmpty()) {
+                throw BusinessException.validation(fields);
+            }
+        } else if (config.form() == SourceForm.PROJECT) {
+            // ① 结构冲突优先（400）：项目形态不允许说明或会议字段
+            if (hasText(req.sourceNote()) || req.sourceMeetingId() != null
+                    || req.sourceDecisionItemId() != null) {
+                List<ApiError.FieldError> errors = new ArrayList<>();
+                if (hasText(req.sourceNote())) {
+                    errors.add(new ApiError.FieldError("sourceNote", "项目来源不能填写说明", 0));
+                }
+                if (req.sourceMeetingId() != null) {
+                    errors.add(new ApiError.FieldError("sourceMeetingId", "项目来源不能关联会议", 0));
+                }
+                if (req.sourceDecisionItemId() != null) {
+                    errors.add(new ApiError.FieldError("sourceDecisionItemId", "项目来源不能关联会议", 0));
+                }
+                throw new BusinessException(ErrorCode.PROJECT_SOURCE_CONFLICT,
+                        "项目来源不能填写说明或关联会议", errors, Map.of());
+            }
+            // ② 缺选（422）
+            if (req.sourceProjectId() == null) {
+                throw BusinessException.validation("sourceProjectId", "项目来源必须选择项目");
+            }
+            // ③ 停用/已删（400）：requireKnown → PROJECT_INVALID，禁用 → PROJECT_DISABLED
+            projects.requireEnabled(req.sourceProjectId());
+        } else { // NOTE
+            if (!hasText(req.sourceNote())) {
+                fields.put("sourceNote", "请填写来源说明，说明这条任务从哪来");
+            }
+            if (req.sourceProjectId() != null) {
+                fields.put("sourceProjectId", "非项目来源不能关联项目");
             }
             if (req.sourceMeetingId() != null) {
                 fields.put("sourceMeetingId", "非会议来源不能关联会议");
@@ -209,9 +254,9 @@ public class TaskService {
             if (req.sourceDecisionItemId() != null) {
                 fields.put("sourceDecisionItemId", "非会议来源不能关联决议项");
             }
-        }
-        if (!fields.isEmpty()) {
-            throw BusinessException.validation(fields);
+            if (!fields.isEmpty()) {
+                throw BusinessException.validation(fields);
+            }
         }
         if (config.form() == SourceForm.MEETING) {
             List<Long> meetingIds = jdbc.query(
@@ -233,6 +278,14 @@ public class TaskService {
             }
         }
         return config;
+    }
+
+    private static boolean hasText(String value) {
+        return value != null && !value.isBlank();
+    }
+
+    private static String trimToNull(String value) {
+        return hasText(value) ? value.trim() : null;
     }
 
     public static UserRef ref(long id, String name) {

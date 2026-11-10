@@ -11,6 +11,7 @@ import { computed, nextTick, reactive, ref, watch } from 'vue'
 import Drawer from '@/components/ui/Drawer.vue'
 import AppButton from '@/components/ui/AppButton.vue'
 import AppInput from '@/components/ui/AppInput.vue'
+import AppSearchSelect from '@/components/ui/AppSearchSelect.vue'
 import AppSelect from '@/components/ui/AppSelect.vue'
 import AppDatePicker from '@/components/ui/AppDatePicker.vue'
 import AppTextarea from '@/components/ui/AppTextarea.vue'
@@ -19,8 +20,15 @@ import { toApiError } from '@/api/http'
 import { useToast } from '@/composables/useToast'
 import { PRIORITY_LABELS, SOURCE_FORM_LABELS } from '@/types/enums'
 import type { Priority, SourceForm, SourceType } from '@/types/enums'
-import type { DecisionItemRow, SourceTypeOption, TaskDetail, UserOption } from '@/types/api'
+import type {
+  DecisionItemRow,
+  ProjectOptionRow,
+  SourceTypeOption,
+  TaskDetail,
+  UserOption,
+} from '@/types/api'
 import { sourceOptions as buildSourceOptions, type SourceOption } from '@/utils/sourceOptions'
+import { DISABLED_SUFFIX, projectOptions as buildProjectOptions } from '@/utils/projectOptions'
 
 const props = withDefaults(
   defineProps<{
@@ -30,8 +38,10 @@ const props = withDefaults(
     meetings: Array<{ id: number; title: string }>
     /** meta.sourceTypes 全量（AC-2 / AC-5）：来源选项与形态都来自配置，不写死三类 */
     sourceTypes?: SourceTypeOption[]
+    /** meta.projects 全量（含已停用）；新建只列启用项，编辑态用快照回显 */
+    projects?: ProjectOptionRow[]
   }>(),
-  { task: null, sourceTypes: () => [] },
+  { task: null, sourceTypes: () => [], projects: () => [] },
 )
 
 const emit = defineEmits<{ close: []; saved: [detail: TaskDetail] }>()
@@ -49,6 +59,8 @@ interface FormState {
   sourceType: SourceType
   meetingId: number | ''
   decisionItemId: number | ''
+  /** 项目型来源（form=PROJECT）的绑定位；其他形态恒为 '' */
+  projectId: number | ''
   note: string
   priority: Priority
 }
@@ -90,10 +102,30 @@ const currentSourceLabel = computed(() => {
 function formOf(code: SourceType): SourceForm {
   const picked = props.sourceTypes.find((item) => item.value === code)
   if (picked) return picked.form
+  // 配置缺该编码（来源已删）时用任务行快照的 form，否则项目型任务会被误判成说明型
+  const snapshot = props.task?.source
+  if (snapshot?.form && snapshot.type === code) return snapshot.form
   return code === 'MEETING' ? 'MEETING' : 'NOTE'
 }
 
 const activeForm = computed<SourceForm>(() => formOf(form.sourceType))
+
+/** 新建下拉只列启用项目（AC-3）：停用项不得出现在建任务的可选项里，也不带「未指定项目」 */
+const projectItems = computed(() =>
+  buildProjectOptions(props.projects, { allOption: false, includeDisabled: false }),
+)
+/** 无可用项目：字段保留但禁用（不隐藏，避免表单项跳动，DESIGN §1.4） */
+const noProjectAvailable = computed(() => projectItems.value.length === 0)
+const NO_PROJECT_TEXT = '还没有可用项目。请联系管理员在「系统设置 → 项目配置」添加项目。'
+
+/** 编辑态只读回显项目：名称取任务快照，停用加后缀 */
+const currentProject = computed(() => props.task?.source ?? null)
+const currentProjectLabel = computed(() => {
+  const source = currentProject.value
+  if (!source || source.projectId == null) return ''
+  const name = source.projectName || `项目 #${source.projectId}`
+  return source.projectEnabled === false ? `${name}${DISABLED_SUFFIX}` : name
+})
 
 const ownerOptions = computed(() =>
   (Array.isArray(props.owners) ? props.owners : []).map((owner) => ({
@@ -130,6 +162,7 @@ function blankForm(): FormState {
     sourceType: 'MEETING',
     meetingId: '',
     decisionItemId: '',
+    projectId: '',
     note: '',
     priority: 'MEDIUM',
   }
@@ -186,6 +219,7 @@ function resetForm(): void {
   form.sourceType = task.source?.type ?? 'MEETING'
   form.meetingId = task.source?.meetingId ?? ''
   form.decisionItemId = task.source?.decisionItemId ?? ''
+  form.projectId = task.source?.projectId ?? ''
   form.note = task.source?.note ?? ''
   form.priority = task.priority ?? 'MEDIUM'
   if (activeForm.value === 'MEETING' && form.meetingId !== '') {
@@ -226,14 +260,15 @@ function onSourceChange(value: string): void {
   form.sourceType = value
   clearError('meetingId')
   clearError('note')
-  // 切形态即清空另一组字段：避免带着旧形态的会议/说明提交，被服务端 422 打回（AC-2）
+  clearError('projectId')
+  // 切形态即清空另外两组字段：三态互斥由服务端单点判定，前端不能带着旧字段提交（AC-2）
   if (nextForm !== 'MEETING') {
     form.meetingId = ''
     form.decisionItemId = ''
     items.value = []
-  } else {
-    form.note = ''
   }
+  if (nextForm !== 'PROJECT') form.projectId = ''
+  if (nextForm !== 'NOTE') form.note = ''
   formSwitched.value = changedForm
 }
 
@@ -275,6 +310,12 @@ function validate(): string[] {
         errors.meetingId = '请选择来源会议'
         order.push('meetingId')
       }
+    } else if (activeForm.value === 'PROJECT') {
+      // 项目型来源必须绑项目（AC-3）：三态互斥后会议/说明都不再是替代品
+      if (form.projectId === '') {
+        errors.projectId = '请选择来源项目'
+        order.push('projectId')
+      }
     } else if (!form.note.trim()) {
       errors.note = '请填写来源说明，说明这条任务从哪来'
       order.push('note')
@@ -295,7 +336,8 @@ async function focusFirst(order: string[]): Promise<void> {
   await nextTick()
   const el = fieldEls[first]
   if (!el) return
-  el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  // jsdom / 老内核可能没有 scrollIntoView：滚动只是体验，缺了不能让错误提示丢失
+  el.scrollIntoView?.({ block: 'center', behavior: 'smooth' })
   const target = el.querySelector<HTMLElement>('input, select, textarea')
   target?.focus()
 }
@@ -303,6 +345,7 @@ async function focusFirst(order: string[]): Promise<void> {
 const SERVER_FIELD_MAP: Record<string, string> = {
   sourceMeetingId: 'meetingId',
   sourceDecisionItemId: 'decisionItemId',
+  sourceProjectId: 'projectId',
   sourceNote: 'note',
 }
 
@@ -342,12 +385,18 @@ async function save(): Promise<void> {
           ownerId: form.ownerId === '' ? null : Number(form.ownerId),
           dueDate: form.dueDate,
           sourceType: form.sourceType,
+          // 三态互斥（AC-2）：按形态只带自己那一组字段，另外两组一律不出现
           sourceMeetingId: activeForm.value === 'MEETING' ? Number(form.meetingId) : undefined,
           sourceDecisionItemId:
             activeForm.value === 'MEETING' && form.decisionItemId !== ''
               ? Number(form.decisionItemId)
               : undefined,
-          sourceNote: activeForm.value === 'MEETING' ? form.note.trim() || undefined : form.note.trim(),
+          sourceProjectId:
+            activeForm.value === 'PROJECT' && form.projectId !== ''
+              ? Number(form.projectId)
+              : undefined,
+          sourceNote:
+            activeForm.value === 'NOTE' ? form.note.trim() || undefined : undefined,
           priority: form.priority,
         })
     toast.success(isEdit.value ? '任务已更新' : '任务已创建')
@@ -407,8 +456,12 @@ async function save(): Promise<void> {
           <span class="source-readonly__label">来源类型</span>
           <span class="source-readonly__value">{{ currentSourceLabel }}</span>
         </div>
+        <div v-if="isEdit && currentProjectLabel" class="source-readonly">
+          <span class="source-readonly__label">来源项目</span>
+          <span class="source-readonly__value">{{ currentProjectLabel }}</span>
+        </div>
         <AppSelect
-          v-else
+          v-if="!isEdit"
           :model-value="form.sourceType"
           :options="sourceOptions"
           label="来源类型"
@@ -446,6 +499,23 @@ async function save(): Promise<void> {
             hint="已转为任务的决议项不可重复选择"
             @update:model-value="onDecisionItem"
           />
+        </template>
+        <template v-else-if="activeForm === 'PROJECT'">
+          <div :ref="(el) => setFieldEl('projectId', el)">
+            <AppSearchSelect
+              :model-value="form.projectId === '' ? '' : String(form.projectId)"
+              :options="projectItems"
+              label="来源项目"
+              required
+              :disabled="noProjectAvailable"
+              placeholder="搜索或选择项目"
+              :empty-text="NO_PROJECT_TEXT"
+              :hint="noProjectAvailable ? NO_PROJECT_TEXT : '按项目名称搜索；停用项目不可新建任务'"
+              :invalid="Boolean(errors.projectId)"
+              :error="errors.projectId"
+              @update:model-value="form.projectId = $event ? Number($event) : ''; clearError('projectId')"
+            />
+          </div>
         </template>
         <div v-else :ref="(el) => setFieldEl('note', el)">
           <AppTextarea

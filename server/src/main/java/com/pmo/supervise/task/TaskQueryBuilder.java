@@ -2,6 +2,7 @@ package com.pmo.supervise.task;
 
 import com.pmo.supervise.common.BusinessException;
 import com.pmo.supervise.common.TaskStatus;
+import com.pmo.supervise.project.ProjectFilterSql;
 import com.pmo.supervise.source.SourceTypeService;
 import com.pmo.supervise.task.dto.TaskFilter;
 import org.springframework.stereotype.Component;
@@ -23,9 +24,11 @@ import java.util.Map;
 public class TaskQueryBuilder {
 
     private final SourceTypeService sourceTypes;
+    private final ProjectFilterSql projectFilter;
 
-    public TaskQueryBuilder(SourceTypeService sourceTypes) {
+    public TaskQueryBuilder(SourceTypeService sourceTypes, ProjectFilterSql projectFilter) {
         this.sourceTypes = sourceTypes;
+        this.projectFilter = projectFilter;
     }
 
     public TaskQuery build(TaskFilter filter, LocalDate today) {
@@ -51,6 +54,8 @@ public class TaskQueryBuilder {
             where.append(" AND t.source_type = :sourceType");
             params.put("sourceType", sourceTypes.requireKnown(f.getSourceType().trim()).code());
         }
+        // 项目谓词只有一份：任务池 / 看板 / 矩阵都从这里走（AC-5「同源」的结构保证）。
+        projectFilter.append(where, params, f.getProject());
         if (f.getMeetingId() != null) {
             where.append(" AND t.source_meeting_id = :meetingId");
             params.put("meetingId", f.getMeetingId());
