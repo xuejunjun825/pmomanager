@@ -8,6 +8,7 @@ import com.pmo.supervise.common.UserStatus;
 import com.pmo.supervise.dashboard.dto.MatrixFilter;
 import com.pmo.supervise.dashboard.dto.MatrixRow;
 import com.pmo.supervise.dashboard.dto.MatrixView;
+import com.pmo.supervise.project.ProjectFilterSql;
 import com.pmo.supervise.source.SourceTypeService;
 import com.pmo.supervise.task.TaskSql;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
@@ -62,10 +63,13 @@ public class MatrixService {
 
     private final NamedParameterJdbcTemplate jdbc;
     private final SourceTypeService sourceTypes;
+    private final ProjectFilterSql projectFilter;
 
-    public MatrixService(NamedParameterJdbcTemplate jdbc, SourceTypeService sourceTypes) {
+    public MatrixService(NamedParameterJdbcTemplate jdbc, SourceTypeService sourceTypes,
+                         ProjectFilterSql projectFilter) {
         this.jdbc = jdbc;
         this.sourceTypes = sourceTypes;
+        this.projectFilter = projectFilter;
     }
 
     /** HTTP 入口：仅管理员 / 管理层可读（AC-16）。 */
@@ -90,6 +94,8 @@ public class MatrixService {
             sql.append(" AND t.source_type = :sourceType");
             params.put("sourceType", sourceType);
         }
+        // 项目筛选只有 ProjectFilterSql 一份谓词（AC-5）：任务池/看板经 TaskQueryBuilder，这里直接调同一方法。
+        projectFilter.append(sql, params, safeFilter.getProject());
         if (range != null) {
             sql.append(" AND t.due_date >= :rangeFrom AND t.due_date <= :rangeTo");
             params.put("rangeFrom", range.from());

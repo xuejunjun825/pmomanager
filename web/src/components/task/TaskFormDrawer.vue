@@ -28,7 +28,11 @@ import type {
   UserOption,
 } from '@/types/api'
 import { sourceOptions as buildSourceOptions, type SourceOption } from '@/utils/sourceOptions'
-import { DISABLED_SUFFIX, projectOptions as buildProjectOptions } from '@/utils/projectOptions'
+import {
+  DISABLED_SUFFIX,
+  projectOptions as buildProjectOptions,
+  projectView,
+} from '@/utils/projectOptions'
 
 const props = withDefaults(
   defineProps<{
@@ -44,7 +48,12 @@ const props = withDefaults(
   { task: null, sourceTypes: () => [], projects: () => [] },
 )
 
-const emit = defineEmits<{ close: []; saved: [detail: TaskDetail] }>()
+const emit = defineEmits<{
+  close: []
+  saved: [detail: TaskDetail]
+  /** 项目清单可能过期（新增/停用/删除），请求父级重拉 meta（DESIGN §3.4） */
+  'refresh-meta': []
+}>()
 
 const toast = useToast()
 
@@ -117,14 +126,15 @@ const projectItems = computed(() =>
 /** 无可用项目：字段保留但禁用（不隐藏，避免表单项跳动，DESIGN §1.4） */
 const noProjectAvailable = computed(() => projectItems.value.length === 0)
 const NO_PROJECT_TEXT = '还没有可用项目。请联系管理员在「系统设置 → 项目配置」添加项目。'
+const NO_MATCH_TEXT = '没有匹配的项目'
 
-/** 编辑态只读回显项目：名称取任务快照，停用加后缀 */
-const currentProject = computed(() => props.task?.source ?? null)
+/** 编辑态只读回显项目：唯一判定点 `projectView`，停用加后缀、改形历史显示「未指定项目」 */
 const currentProjectLabel = computed(() => {
-  const source = currentProject.value
-  if (!source || source.projectId == null) return ''
-  const name = source.projectName || `项目 #${source.projectId}`
-  return source.projectEnabled === false ? `${name}${DISABLED_SUFFIX}` : name
+  const view = projectView(props.task?.source)
+  if (!view) return ''
+  if (view.unspecified) return '未指定项目'
+  const name = view.name || `项目 #${props.task?.source?.projectId}`
+  return view.enabled ? name : `${name}${DISABLED_SUFFIX}`
 })
 
 const ownerOptions = computed(() =>
@@ -406,6 +416,16 @@ async function save(): Promise<void> {
     const apiError = toApiError(error)
     if (apiError.status === 422 && apiError.fieldErrors.length) {
       applyServerErrors(apiError.fieldErrors)
+    } else if (
+      !isEdit.value &&
+      activeForm.value === 'PROJECT' &&
+      (apiError.code === 'PROJECT_DISABLED' || apiError.code === 'PROJECT_INVALID')
+    ) {
+      // 项目清单已过期（被停用/删除）：清空选择并请父级重拉 meta（DESIGN §3.4）
+      form.projectId = ''
+      clearError('projectId')
+      toast.warning(apiError.message || '该项目已停用，请重新选择')
+      emit('refresh-meta')
     } else if (apiError.status === 409) {
       summary.value = apiError.message || '任务状态已变化，请关闭抽屉后重试'
     } else {
@@ -470,7 +490,7 @@ async function save(): Promise<void> {
           @update:model-value="onSourceChange"
         />
         <p v-if="isEdit" class="task-form__hint">
-          来源在创建时确定，不可修改；如需更换来源请新建任务
+          来源在创建时确定，不可修改（含来源项目）；如需更换来源请新建任务
         </p>
         <p v-if="formSwitched && !isEdit" class="task-form__warn">
           已切换形态，保存后按新形态校验
@@ -501,16 +521,21 @@ async function save(): Promise<void> {
           />
         </template>
         <template v-else-if="activeForm === 'PROJECT'">
-          <div :ref="(el) => setFieldEl('projectId', el)">
+          <!-- 编辑态不提供改项目入口（DESIGN §3.4）：项目只在上方只读行回显 -->
+          <div v-if="!isEdit" :ref="(el) => setFieldEl('projectId', el)">
             <AppSearchSelect
               :model-value="form.projectId === '' ? '' : String(form.projectId)"
               :options="projectItems"
               label="来源项目"
               required
               :disabled="noProjectAvailable"
-              placeholder="搜索或选择项目"
-              :empty-text="NO_PROJECT_TEXT"
-              :hint="noProjectAvailable ? NO_PROJECT_TEXT : '按项目名称搜索；停用项目不可新建任务'"
+              placeholder="选择项目"
+              :empty-text="noProjectAvailable ? NO_PROJECT_TEXT : NO_MATCH_TEXT"
+              :hint="
+                noProjectAvailable
+                  ? NO_PROJECT_TEXT
+                  : '只列启用项目；项目由管理员在「系统设置 → 项目配置」维护'
+              "
               :invalid="Boolean(errors.projectId)"
               :error="errors.projectId"
               @update:model-value="form.projectId = $event ? Number($event) : ''; clearError('projectId')"

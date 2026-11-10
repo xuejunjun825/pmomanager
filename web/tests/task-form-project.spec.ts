@@ -12,6 +12,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia } from 'pinia'
 import TaskFormDrawer from '@/components/task/TaskFormDrawer.vue'
+import { ApiError } from '@/api/http'
+import { useUiStore } from '@/stores/ui'
 import type { ProjectOptionRow, SourceTypeOption, TaskDetail, UserOption } from '@/types/api'
 
 const taskApiMock = vi.hoisted(() => ({
@@ -234,6 +236,11 @@ describe('T08 建任务抽屉 · 项目型来源', () => {
     mountDrawer({ open: true, task, sourceTypes: SOURCE_CONFIG, projects: PROJECTS })
 
     expect(sourceSelect(), '编辑态来源只读').toBeUndefined()
+    expect(
+      document.body.querySelector('input[role="combobox"]'),
+      '编辑态不提供改项目入口（DESIGN §3.4）',
+    ).toBeNull()
+    expect(document.body.textContent).toContain('不可修改（含来源项目）')
     const rows = [...document.body.querySelectorAll('.source-readonly')].map((row) => ({
       label: row.querySelector('.source-readonly__label')?.textContent?.trim(),
       value: row.querySelector('.source-readonly__value')?.textContent?.trim(),
@@ -242,5 +249,47 @@ describe('T08 建任务抽屉 · 项目型来源', () => {
       { label: '来源类型', value: '客户投诉' },
       { label: '来源项目', value: '停用项目（已停用）' },
     ])
+  })
+
+  it('编辑态改形历史（form=PROJECT 但无项目）：只读回显「未指定项目」', () => {
+    const task = {
+      id: 8,
+      title: '改形后的历史任务',
+      priority: 'MEDIUM',
+      dueDate: '2026-12-01',
+      source: { type: 'S20001', typeLabel: '客户投诉', form: 'PROJECT' },
+    } as unknown as TaskDetail
+    mountDrawer({ open: true, task, sourceTypes: SOURCE_CONFIG, projects: PROJECTS })
+
+    expect(document.body.querySelector('input[role="combobox"]')).toBeNull()
+    const values = [...document.body.querySelectorAll('.source-readonly__value')].map((row) =>
+      row.textContent?.trim(),
+    )
+    expect(values).toEqual(['客户投诉', '未指定项目'])
+  })
+
+  it('项目清单已过期（服务端 400 PROJECT_DISABLED）：清空选择并请父级重拉 meta', async () => {
+    const wrapper = mountDrawer({ open: true, sourceTypes: SOURCE_CONFIG, projects: PROJECTS })
+    await pickFromSelect('来源类型', 'S20001')
+    await fillBasics()
+    await pickProject('老旧小区改造')
+
+    taskApiMock.create.mockRejectedValueOnce(
+      new ApiError({
+        status: 400,
+        code: 'PROJECT_DISABLED',
+        message: '该项目已停用，请重新选择',
+      }),
+    )
+    saveButton().click()
+    await flushPromises()
+
+    // 字段被清空：combobox 回到占位态，选中项不再显示
+    const control = fieldByLabel('来源项目')?.querySelector('.field__control')
+    expect(control?.textContent).not.toContain('老旧小区改造')
+    expect(wrapper.emitted('refresh-meta')).toHaveLength(1)
+    expect(wrapper.emitted('saved')).toBeUndefined()
+    const toasts = useUiStore().toasts.map((item) => item.message)
+    expect(toasts).toContain('该项目已停用，请重新选择')
   })
 })

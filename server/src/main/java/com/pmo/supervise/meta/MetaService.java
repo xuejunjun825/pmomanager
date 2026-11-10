@@ -9,6 +9,7 @@ import com.pmo.supervise.meta.dto.MetaOptions;
 import com.pmo.supervise.meta.dto.MetaOptions.MeetingOption;
 import com.pmo.supervise.meta.dto.MetaOptions.Option;
 import com.pmo.supervise.meta.dto.MetaOptions.OwnerOption;
+import com.pmo.supervise.project.ProjectService;
 import com.pmo.supervise.source.SourceTypeService;
 import com.pmo.supervise.source.dto.SourceTypeOption;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -29,10 +30,12 @@ public class MetaService {
 
     private final JdbcTemplate jdbc;
     private final SourceTypeService sourceTypes;
+    private final ProjectService projects;
 
-    public MetaService(JdbcTemplate jdbc, SourceTypeService sourceTypes) {
+    public MetaService(JdbcTemplate jdbc, SourceTypeService sourceTypes, ProjectService projects) {
         this.jdbc = jdbc;
         this.sourceTypes = sourceTypes;
+        this.projects = projects;
     }
 
     @Transactional(readOnly = true)
@@ -70,6 +73,8 @@ public class MetaService {
                 meetings,
                 // 停用来源也要出现在筛选里：历史任务仍挂着它们（AC-5）。
                 sourceTypes.options(),
+                // 项目不是权限维度：全员同一份（含停用，前端投影决定后缀与可选项，AC-8）。
+                projects.options(),
                 Arrays.stream(TaskStatus.values()).map(v -> new Option<>(v, v.label())).toList(),
                 Arrays.stream(Priority.values()).map(v -> new Option<>(v, v.label())).toList());
     }

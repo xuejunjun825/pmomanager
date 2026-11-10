@@ -359,6 +359,7 @@ onBeforeUnmount(() => {
       :projects="projects"
       @close="drawerOpen = false"
       @saved="onCreated"
+      @refresh-meta="loadMeta"
     />
   </section>
 </template>

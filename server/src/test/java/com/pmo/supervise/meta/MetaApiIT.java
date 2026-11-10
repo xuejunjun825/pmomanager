@@ -16,6 +16,7 @@ import java.time.LocalDate;
 
 import static org.hamcrest.Matchers.everyItem;
 import static org.hamcrest.Matchers.hasItem;
+import static org.hamcrest.Matchers.hasItems;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.not;
@@ -65,12 +66,12 @@ class MetaApiIT extends IntegrationTestSupport {
                 .andExpect(jsonPath("$.meetings[0].id").value(meeting))
                 .andExpect(jsonPath("$.meetings[0].title").value("Meta 会议"))
                 .andExpect(jsonPath("$.meetings[0].meetingDate").value("2026-11-01"))
-                .andExpect(jsonPath("$.sourceTypes", hasSize(3)))
-                .andExpect(jsonPath("$.sourceTypes[0].value").value("MEETING"))
-                .andExpect(jsonPath("$.sourceTypes[0].label").value("会议决议"))
-                .andExpect(jsonPath("$.sourceTypes[0].color").value("#1B4D8F"))
-                .andExpect(jsonPath("$.sourceTypes[0].form").value("MEETING"))
-                .andExpect(jsonPath("$.sourceTypes[0].enabled").value(true))
+                // 来源类型是管理员可维护的主数据，数量会随配置变；按编码取而不是按位置断言（AC-5）
+                .andExpect(jsonPath("$.sourceTypes[*].value", hasItems("MEETING", "PROJECT", "DAILY")))
+                .andExpect(jsonPath("$.sourceTypes[?(@.value == 'MEETING')].label", hasItem("会议决议")))
+                .andExpect(jsonPath("$.sourceTypes[?(@.value == 'MEETING')].color", hasItem("#1B4D8F")))
+                .andExpect(jsonPath("$.sourceTypes[?(@.value == 'MEETING')].form", hasItem("MEETING")))
+                .andExpect(jsonPath("$.sourceTypes[?(@.value == 'MEETING')].enabled", hasItem(true)))
                 .andExpect(jsonPath("$.statuses", hasSize(TaskStatus.values().length)))
                 .andExpect(jsonPath("$.statuses[0].value").value(TaskStatus.values()[0].name()))
                 .andExpect(jsonPath("$.priorities", hasSize(Priority.values().length)))
@@ -96,5 +97,47 @@ class MetaApiIT extends IntegrationTestSupport {
                 .andExpect(jsonPath("$.meetings", hasSize(1)))
                 .andExpect(jsonPath("$.meetings[0].id").value(ownMeeting))
                 .andExpect(jsonPath("$.meetings[*].id", not(hasItem((int) otherMeeting))));
+    }
+
+    /**
+     * 项目不是权限维度（AC-8）：ADMIN 与 OWNER 拿到同一份项目下拉，含停用项（筛选仍要能选中历史项目）。
+     * 契约只暴露 id/name/enabled/sort —— 编码与引用计数是管理接口的信息，不能漏进全员可读的 meta。
+     */
+    @Test
+    void projectsAreIdenticalForEveryRoleAndExposeOnlyFourFields() throws Exception {
+        seedUser("metaadmin", "Meta 管理员", Role.ADMIN, "ACTIVE");
+        seedOwner("metaowner", "Meta 负责人");
+        seedProject("P00001", "智能工厂", 1, true);
+        seedProject("P00002", "已停用项目", 2, false);
+        seedProject("P00003", "城市更新一期", 3, true);
+
+        MockHttpSession adminSession = login("metaadmin");
+        mvc.perform(get("/api/meta/options").session(adminSession))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.projects", hasSize(3)))
+                .andExpect(jsonPath("$.projects[0].name").value("智能工厂"))
+                .andExpect(jsonPath("$.projects[1].name").value("已停用项目"))
+                .andExpect(jsonPath("$.projects[2].name").value("城市更新一期"))
+                .andExpect(jsonPath("$.projects[1].enabled").value(false))
+                .andExpect(jsonPath("$.projects[0].sort").value(1))
+                .andExpect(jsonPath("$.projects[0].id").isNumber())
+                // 管理视图独有的两个字段绝不下发（AC-8 / 反面目标：meta 泄露编码与引用计数）
+                .andExpect(jsonPath("$.projects[0].code").doesNotExist())
+                .andExpect(jsonPath("$.projects[0].usageCount").doesNotExist())
+                .andExpect(jsonPath("$.projects[1].code").doesNotExist())
+                .andExpect(jsonPath("$.projects[1].usageCount").doesNotExist());
+
+        MockHttpSession ownerSession = login("metaowner");
+        mvc.perform(get("/api/meta/options").session(ownerSession))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.projects", hasSize(3)))
+                .andExpect(jsonPath("$.projects[*].name", hasItems("智能工厂", "已停用项目", "城市更新一期")))
+                .andExpect(jsonPath("$.projects[0].code").doesNotExist())
+                .andExpect(jsonPath("$.projects[0].usageCount").doesNotExist());
+    }
+
+    private void seedProject(String code, String name, int sort, boolean enabled) {
+        jdbc.update("INSERT INTO projects (code, name, sort_no, enabled) VALUES (?, ?, ?, ?)",
+                code, name, sort, enabled ? 1 : 0);
     }
 }

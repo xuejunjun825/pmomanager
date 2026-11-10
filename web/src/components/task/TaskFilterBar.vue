@@ -295,4 +295,17 @@ function clearAll(): void {
 .chip:hover .chip__x {
   color: var(--c-primary);
 }
+/* ≤768（钉钉 H5）：每行 2 个控件，项目下拉占满半宽（DESIGN §6） */
+@media (max-width: 768px) {
+  .filter__search {
+    width: 100%;
+  }
+  .filter__row > * {
+    flex: 1 1 calc(50% - var(--sp-2));
+    min-width: 0;
+  }
+  .filter__project {
+    width: auto;
+  }
+}
 </style>

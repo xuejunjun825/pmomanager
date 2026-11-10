@@ -4,10 +4,12 @@ package com.pmo.supervise.dashboard.dto;
  * 矩阵筛选条件（GET /api/matrix，AC-15）。
  * range：WEEK=本周一至本周日 / MONTH=当月 1 号至月末 / ALL=不限（默认），按 due_date 过滤；
  * includeDisabled：默认 true（AC-15 要求默认含已停用用户），显式 false 时仅统计在职用户。
+ * project：项目 id，或「none」= 未指定项目（改形历史）；空 = 不按项目过滤（AC-5）。
  */
 public class MatrixFilter {
 
     private String sourceType;
+    private String project;
     private String range = "ALL";
     private Boolean includeDisabled;
 
@@ -17,6 +19,14 @@ public class MatrixFilter {
 
     public void setSourceType(String sourceType) {
         this.sourceType = sourceType;
+    }
+
+    public String getProject() {
+        return project;
+    }
+
+    public void setProject(String project) {
+        this.project = project;
     }
 
     public String getRange() {
