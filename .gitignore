@@ -17,6 +17,9 @@ dist/
 .pnpm-store/
 *.tsbuildinfo
 
+# 演示截图（人工复测临时产物，勿入库；原先只在本机 .git/info/exclude 里）
+.demo-shots/
+
 # IDE / 编辑器
 .idea/
 *.iml

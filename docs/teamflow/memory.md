@@ -14,7 +14,7 @@
 - 来源形态三态（r4 起）：`MEETING` 绑会议+决议项 / `PROJECT` 绑项目 / `NOTE` 自由说明，三者互斥由服务端单点判定、库层只兜「至多一类非空」；形态变更不迁移历史任务数据（改形后历史任务显示「未指定项目」）。注意内置来源编码 `PROJECT`（项目任务）是 `NOTE` 形态，与形态值同名不同义，不得互相兜底。
 - 项目是主数据不是权限维度（r4 起）：仅 ADMIN 维护（名称唯一 2–20 字、编码 `P%05d` 系统生成不可改、被引用只能停用、上限 200），全员可读可筛；建任务时「形态 ↔ 字段」配对由服务端单点判定，库层 `ck_tasks_source` 只兜「三组字段恰好一组非空」。
 - 项目三处单一实现点（r4 起，禁止复制）：筛选谓词只有 `server/src/main/java/com/pmo/supervise/project/ProjectFilterSql.java:append()`（任务池/看板经 `TaskQueryBuilder`、矩阵经 `MatrixService` 共用，`none` = 未指定项目，走 `source_types` 子查询）；前端下拉投影只有 `web/src/utils/projectOptions.ts:projectOptions()`、项目位判定只有 `projectView()`，渲染只有 `web/src/components/ui/ProjectTag.vue`。任务池/矩阵/看板三处合计必须对齐，任何页面不得自拼项目条件或自行比较 `enabled/sort`。
-- 错误体统一 `{code,message,fieldErrors,details,traceId}`，前端 `http.ts` 归一化；会话 7d，CSRF 使用明文 token 契约（`CsrfTokenRequestAttributeHandler`）。
+- 错误体统一 `{code,message,fieldErrors,details,traceId}`，前端 `http.ts` 归一化；会话 7d，CSRF 使用明文 token 契约（`CsrfTokenRequestAttributeHandler`）。会话 id 只在登录成功时轮换一次（r5 起）：登录处显式一次换发、认证请求一律不换发 `SUPERVISE_SESSION`；不得用「关掉会话固定防护」或「前端 401 重试/串行化」换取并发稳定。
 - 契约文档只写 `docs/teamflow/<yyyyMMdd-rN-slug>/`；跨需求记忆在本文件。
 
 ## 已知待办

@@ -70,6 +70,7 @@ public class AuthService {
     /** 登录成功后的唯一会话入口：钉钉扫码/免登也走这里，保证 last_login_at 与审计口径一致。 */
     @Transactional
     public AuthUser establish(User user, HttpServletRequest request) {
+        AuthSession.rotateSessionId(request);   // 唯一换发点：表单登录 / 钉钉扫码 / 免登同口径
         user.setLastLoginAt(clock.now());
         User saved = users.save(user);
         Actor actor = new Actor(saved.getId(), saved.getRole(), saved.getName());

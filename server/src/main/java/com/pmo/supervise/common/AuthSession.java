@@ -22,6 +22,20 @@ public final class AuthSession {
     private AuthSession() {
     }
 
+    /**
+     * 登录成功时换发会话 id —— 会话固定防护的唯一入口。
+     * 无会话时不动：新会话 id 由随后的 getSession(true) 生成，登录后自然与匿名期不同。
+     *
+     * <p>与 {@link #signIn(HttpServletRequest, Actor)} 解耦：角色刷新（me）也调 signIn，
+     * 若把换发挂在 signIn 上，刷新角色就会换 id。只有登录汇合点可调用本方法。</p>
+     */
+    public static void rotateSessionId(HttpServletRequest request) {
+        HttpSession session = request.getSession(false);
+        if (session != null) {
+            request.changeSessionId();   // 只改 id，属性全部保留；容器据此下发新 Set-Cookie
+        }
+    }
+
     /** 写入会话并使 SecurityContext 立即可用（同一请求后续代码可读到）。 */
     public static void signIn(HttpServletRequest request, Actor actor) {
         HttpSession session = request.getSession(true);
