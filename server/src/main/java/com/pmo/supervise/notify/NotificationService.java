@@ -62,6 +62,7 @@ public class NotificationService {
         MapSqlParameterSource params = new MapSqlParameterSource()
                 .addValue("userId", cmd.userId())
                 .addValue("taskId", cmd.taskId())
+                .addValue("progressId", cmd.progressId())
                 .addValue("type", cmd.type().name())
                 .addValue("notifyDate", clock.today())
                 .addValue("dedupKey", cmd.dedupKey())
@@ -72,9 +73,9 @@ public class NotificationService {
         try {
             jdbc.update("""
                     INSERT INTO notifications
-                        (user_id, task_id, type, notify_date, dedup_key, title, body,
+                        (user_id, task_id, progress_id, type, notify_date, dedup_key, title, body,
                          dingtalk_status, dingtalk_attempts, dingtalk_next_retry_at)
-                    VALUES (:userId, :taskId, :type, :notifyDate, :dedupKey, :title, :body,
+                    VALUES (:userId, :taskId, :progressId, :type, :notifyDate, :dedupKey, :title, :body,
                             :status, 0, :nextRetry)
                     """, params);
         } catch (DuplicateKeyException ex) {
@@ -140,32 +141,41 @@ public class NotificationService {
     }
 
     @Transactional(readOnly = true)
-    public NotificationPage page(long userId, boolean unreadOnly, int page, int size) {
+    public NotificationPage page(long userId, boolean unreadOnly, String type, int page, int size) {
         int safePage = Math.max(page, 1);
         int safeSize = Math.min(Math.max(size, 1), 100);
-        String where = " WHERE n.user_id = :userId" + (unreadOnly ? " AND n.read_at IS NULL" : "");
+        StringBuilder where = new StringBuilder(" WHERE n.user_id = :userId");
+        if (unreadOnly) {
+            where.append(" AND n.read_at IS NULL");
+        }
         Map<String, Object> params = new LinkedHashMap<>();
         params.put("userId", userId);
         params.put("limit", safeSize);
         params.put("offset", (long) (safePage - 1) * safeSize);
+        if (type != null && !type.isBlank()) {
+            // 「@我的」tab 用服务端过滤，分页与未读计数才不会错。
+            where.append(" AND n.type = :type");
+            params.put("type", parseType(type).name());
+        }
 
         Long total = jdbc.queryForObject(
                 "SELECT COUNT(*) FROM notifications n" + where, params, Long.class);
         List<NotificationRow> items = jdbc.query("""
-                SELECT n.id, n.type, n.task_id, n.title, n.created_at, n.dingtalk_status, n.read_at,
-                       n.dingtalk_attempts, n.dingtalk_last_error,
+                SELECT n.id, n.type, n.task_id, n.progress_id, n.title, n.created_at, n.dingtalk_status,
+                       n.read_at, n.dingtalk_attempts, n.dingtalk_last_error,
                        t.title AS task_title, u.name AS owner_name
                 FROM notifications n
                 LEFT JOIN tasks t ON t.id = n.task_id
                 LEFT JOIN users u ON u.id = t.owner_id
                 """ + where + " ORDER BY n.created_at DESC, n.id DESC LIMIT :limit OFFSET :offset",
                 params, (rs, rowNum) -> {
-                    NotifyType type = NotifyType.of(rs.getString("type"));
+                    NotifyType type1 = NotifyType.of(rs.getString("type"));
                     DingTalkStatus status = DingTalkStatus.of(rs.getString("dingtalk_status"));
                     java.sql.Timestamp createdAt = rs.getTimestamp("created_at");
                     return new NotificationRow(
-                            rs.getLong("id"), type, type.label(),
+                            rs.getLong("id"), type1, type1.label(),
                             rs.getObject("task_id", Long.class),
+                            rs.getObject("progress_id", Long.class),
                             rs.getString("task_title"),
                             rs.getString("owner_name"),
                             createdAt == null ? null : createdAt.toLocalDateTime(),
@@ -176,6 +186,14 @@ public class NotificationService {
                 });
         return new NotificationPage(items, total == null ? 0 : total, safePage, safeSize,
                 unreadCount(userId));
+    }
+
+    private NotifyType parseType(String raw) {
+        try {
+            return NotifyType.of(raw.trim().toUpperCase(java.util.Locale.ROOT));
+        } catch (IllegalArgumentException ex) {
+            throw BusinessException.validation("type", "通知类型不合法");
+        }
     }
 
     public long unreadCount(long userId) {
@@ -239,7 +257,13 @@ public class NotificationService {
         if (n.getTaskId() == null) {
             return null;
         }
-        return "/tasks/" + n.getTaskId();
+        // 深链优先带进度锚点；progress_id 只在本行查询时读一次（实体未持有该列）。
+        Long progressId = jdbc.queryForObject(
+                "SELECT progress_id FROM notifications WHERE id = :id",
+                Map.of("id", n.getId()), Long.class);
+        return progressId == null
+                ? "/tasks/" + n.getTaskId()
+                : "/tasks/" + n.getTaskId() + "#progress-" + progressId;
     }
 
     private static String truncate(String value, int max) {

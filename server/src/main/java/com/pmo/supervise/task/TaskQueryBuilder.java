@@ -1,8 +1,8 @@
 package com.pmo.supervise.task;
 
 import com.pmo.supervise.common.BusinessException;
-import com.pmo.supervise.common.SourceType;
 import com.pmo.supervise.common.TaskStatus;
+import com.pmo.supervise.source.SourceTypeService;
 import com.pmo.supervise.task.dto.TaskFilter;
 import org.springframework.stereotype.Component;
 
@@ -15,9 +15,18 @@ import java.util.Map;
  * 把筛选条件编译成带命名参数的 WHERE / ORDER BY（TECHNICAL §4.4）。
  * 四个读页面共享同一个 WHERE 生成器，是 AC-17 跨页一致的结构性保证；
  * 参数全部走命名绑定，关键字不拼进 SQL。
+ *
+ * <p>来源编码不再是枚举：校验统一交给 SourceTypeService.requireKnown，
+ * 未知编码是 400 而不是库层 500；矩阵与任务池因此天然同集合（AC-5）。
  */
 @Component
 public class TaskQueryBuilder {
+
+    private final SourceTypeService sourceTypes;
+
+    public TaskQueryBuilder(SourceTypeService sourceTypes) {
+        this.sourceTypes = sourceTypes;
+    }
 
     public TaskQuery build(TaskFilter filter, LocalDate today) {
         TaskFilter f = filter == null ? new TaskFilter() : filter;
@@ -38,9 +47,9 @@ public class TaskQueryBuilder {
             params.put("ownerId", f.getOwnerId());
         }
         if (hasText(f.getSourceType())) {
-            SourceType sourceType = parseSourceType(f.getSourceType());
+            // 停用来源仍可筛选历史任务，所以这里只校验存在，不看 enabled。
             where.append(" AND t.source_type = :sourceType");
-            params.put("sourceType", sourceType.name());
+            params.put("sourceType", sourceTypes.requireKnown(f.getSourceType().trim()).code());
         }
         if (f.getMeetingId() != null) {
             where.append(" AND t.source_meeting_id = :meetingId");
@@ -79,14 +88,6 @@ public class TaskQueryBuilder {
             return TaskStatus.valueOf(value.trim().toUpperCase());
         } catch (IllegalArgumentException ex) {
             throw BusinessException.validation("status", "任务状态不合法");
-        }
-    }
-
-    private SourceType parseSourceType(String value) {
-        try {
-            return SourceType.valueOf(value.trim().toUpperCase());
-        } catch (IllegalArgumentException ex) {
-            throw BusinessException.validation("sourceType", "来源类型不合法");
         }
     }
 

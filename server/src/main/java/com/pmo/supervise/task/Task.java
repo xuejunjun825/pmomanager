@@ -1,7 +1,6 @@
 package com.pmo.supervise.task;
 
 import com.pmo.supervise.common.Priority;
-import com.pmo.supervise.common.SourceType;
 import com.pmo.supervise.common.TaskStatus;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -34,9 +33,8 @@ public class Task {
     @Column(name = "due_date", nullable = false)
     private LocalDate dueDate;
 
-    @Enumerated(EnumType.STRING)
     @Column(name = "source_type", nullable = false, length = 16)
-    private SourceType sourceType;
+    private String sourceType;
 
     @Column(name = "source_meeting_id")
     private Long sourceMeetingId;
@@ -111,11 +109,11 @@ public class Task {
         this.dueDate = dueDate;
     }
 
-    public SourceType getSourceType() {
+    public String getSourceType() {
         return sourceType;
     }
 
-    public void setSourceType(SourceType sourceType) {
+    public void setSourceType(String sourceType) {
         this.sourceType = sourceType;
     }
 

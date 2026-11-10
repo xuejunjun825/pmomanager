@@ -3,13 +3,14 @@ package com.pmo.supervise.meta;
 import com.pmo.supervise.common.Actor;
 import com.pmo.supervise.common.Priority;
 import com.pmo.supervise.common.Role;
-import com.pmo.supervise.common.SourceType;
 import com.pmo.supervise.common.TaskStatus;
 import com.pmo.supervise.common.UserStatus;
 import com.pmo.supervise.meta.dto.MetaOptions;
 import com.pmo.supervise.meta.dto.MetaOptions.MeetingOption;
 import com.pmo.supervise.meta.dto.MetaOptions.Option;
 import com.pmo.supervise.meta.dto.MetaOptions.OwnerOption;
+import com.pmo.supervise.source.SourceTypeService;
+import com.pmo.supervise.source.dto.SourceTypeOption;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -27,9 +28,11 @@ public class MetaService {
     private static final String OWNER_COLUMNS = "SELECT id, name, role, status FROM users";
 
     private final JdbcTemplate jdbc;
+    private final SourceTypeService sourceTypes;
 
-    public MetaService(JdbcTemplate jdbc) {
+    public MetaService(JdbcTemplate jdbc, SourceTypeService sourceTypes) {
         this.jdbc = jdbc;
+        this.sourceTypes = sourceTypes;
     }
 
     @Transactional(readOnly = true)
@@ -65,7 +68,8 @@ public class MetaService {
         return new MetaOptions(
                 owners,
                 meetings,
-                Arrays.stream(SourceType.values()).map(v -> new Option<>(v, v.label())).toList(),
+                // 停用来源也要出现在筛选里：历史任务仍挂着它们（AC-5）。
+                sourceTypes.options(),
                 Arrays.stream(TaskStatus.values()).map(v -> new Option<>(v, v.label())).toList(),
                 Arrays.stream(Priority.values()).map(v -> new Option<>(v, v.label())).toList());
     }

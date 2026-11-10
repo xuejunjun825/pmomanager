@@ -26,9 +26,9 @@ import { metaApi } from '@/api/meta'
 import { taskApi } from '@/api/tasks'
 import { toApiError, type ApiError } from '@/api/http'
 import { formatDate, formatNumber, formatPercent } from '@/utils/format'
-import { SOURCE_TYPES, SOURCE_TYPE_LABELS, isFinishedStatus } from '@/types/enums'
+import { isFinishedStatus } from '@/types/enums'
 import type { SourceType } from '@/types/enums'
-import type { DashboardView, TaskRow, UrgeResult, UserOption } from '@/types/api'
+import type { DashboardView, SourceTypeOption, TaskRow, UrgeResult, UserOption } from '@/types/api'
 import type { TableColumn } from '@/components/ui/DataTable.vue'
 import type { SelectOption } from '@/components/ui/AppSelect.vue'
 
@@ -53,6 +53,8 @@ let seq = 0
 
 const owners = ref<UserOption[]>([])
 const meetings = ref<{ id: number; title: string }[]>([])
+/** 来源选项来自 meta 全量（含已停用，历史任务仍要能筛），不本地写死三类（AC-5） */
+const sourceTypes = ref<SourceTypeOption[]>([])
 
 const ownerOptions = computed<SelectOption[]>(() => [
   { label: '全部负责人', value: '' },
@@ -62,10 +64,10 @@ const meetingOptions = computed<SelectOption[]>(() => [
   { label: '全部会议', value: '' },
   ...meetings.value.map((meeting) => ({ label: meeting.title, value: String(meeting.id) })),
 ])
-const sourceOptions: SelectOption[] = [
+const sourceOptions = computed<SelectOption[]>(() => [
   { label: '全部来源', value: '' },
-  ...SOURCE_TYPES.map((type) => ({ label: SOURCE_TYPE_LABELS[type], value: type })),
-]
+  ...sourceTypes.value.map((item) => ({ label: item.label, value: item.value })),
+])
 
 const kpis = computed(() => view.value?.kpis ?? null)
 const focusRows = computed<TaskRow[]>(() => view.value?.focus ?? [])
@@ -133,6 +135,7 @@ onMounted(async () => {
     const meta = await metaApi.options()
     owners.value = meta.owners
     meetings.value = meta.meetings
+    sourceTypes.value = meta.sourceTypes ?? []
   } catch {
     /* 选项加载失败只影响筛选下拉，不阻塞看板本体 */
   }
@@ -360,7 +363,11 @@ function urgeReason(task: TaskRow): string {
           <template #cell-title="{ row }">
             <RouterLink class="title-link" :to="`/tasks/${asTask(row).id}`">{{ asTask(row).title }}</RouterLink>
             <SourceTag
-              :type="asTask(row).source.type"
+              :code="asTask(row).source.type"
+              :name="asTask(row).source.typeLabel"
+              :color="asTask(row).source.color"
+              :soft-color="asTask(row).source.softColor"
+              :border-color="asTask(row).source.borderColor"
               :meeting-title="asTask(row).source.meetingTitle"
               class="title-src"
             />

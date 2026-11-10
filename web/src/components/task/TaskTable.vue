@@ -101,7 +101,13 @@ function isHighlighted(row: TaskRow): boolean {
 
     <template #cell-source="{ row }">
       <span class="cell-source">
-        <SourceTag :type="asTask(row).source?.type ?? 'PROJECT'" />
+        <SourceTag
+          :code="asTask(row).source?.type ?? ''"
+          :name="asTask(row).source?.typeLabel"
+          :color="asTask(row).source?.color"
+          :soft-color="asTask(row).source?.softColor"
+          :border-color="asTask(row).source?.borderColor"
+        />
         <span class="cell-text cell-source__text" :class="{ 'is-finished': finished(asTask(row)) }">
           {{ sourceText(asTask(row)) }}
         </span>

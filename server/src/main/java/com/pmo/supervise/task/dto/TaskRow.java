@@ -1,7 +1,6 @@
 package com.pmo.supervise.task.dto;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
-import com.pmo.supervise.common.SourceType;
 import com.pmo.supervise.common.TaskStatus;
 
 import java.time.LocalDate;

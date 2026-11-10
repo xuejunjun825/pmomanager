@@ -31,4 +31,9 @@ public final class NotificationKeys {
     public static String report(long userId, LocalDate notifyDate, NotifyType type) {
         return "report:" + userId + ":" + notifyDate + ":" + type.name();
     }
+
+    /** mention:{progressId}:{userId} —— 被@通知按(进度,用户)幂等（AC-10）。 */
+    public static String mention(long progressId, long userId) {
+        return "mention:" + progressId + ":" + userId;
+    }
 }

@@ -5,10 +5,13 @@
  */
 import { apiGet, apiPatch, apiPost } from './http'
 import type {
+  AddProgressPayload,
   CreateTaskRequest,
   DecisionItemRow,
   MeetingDetail,
   PageResponse,
+  ProgressPage,
+  ProgressRow,
   SubmitCommand,
   TaskDetail,
   TaskEvent,
@@ -130,5 +133,21 @@ export const taskApi = {
   async decisionItems(meetingId: number): Promise<DecisionItemRow[]> {
     const meeting = await apiGet<MeetingDetail>(`/meetings/${meetingId}`)
     return Array.isArray(meeting?.items) ? meeting.items : []
+  },
+
+  /** 进度时间线（倒序分页：beforeId 为上一页最小的进度 id） */
+  progress(
+    taskId: number,
+    params: { limit?: number; beforeId?: number } = {},
+  ): Promise<ProgressPage> {
+    const query: Record<string, number> = {}
+    if (params.limit) query.limit = params.limit
+    if (params.beforeId) query.beforeId = params.beforeId
+    return apiGet<ProgressPage>(`/tasks/${taskId}/progress`, { params: query })
+  },
+
+  /** 追加进度；403 PROGRESS_FORBIDDEN / 409 PROGRESS_LIMIT_REACHED 由调用方各自处理 */
+  addProgress(taskId: number, payload: AddProgressPayload): Promise<ProgressRow> {
+    return apiPost<ProgressRow>(`/tasks/${taskId}/progress`, payload)
   },
 }

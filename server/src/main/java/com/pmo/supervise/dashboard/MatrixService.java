@@ -4,11 +4,11 @@ import com.pmo.supervise.common.Actor;
 import com.pmo.supervise.common.BusinessException;
 import com.pmo.supervise.common.Role;
 import com.pmo.supervise.common.ShanghaiClock;
-import com.pmo.supervise.common.SourceType;
 import com.pmo.supervise.common.UserStatus;
 import com.pmo.supervise.dashboard.dto.MatrixFilter;
 import com.pmo.supervise.dashboard.dto.MatrixRow;
 import com.pmo.supervise.dashboard.dto.MatrixView;
+import com.pmo.supervise.source.SourceTypeService;
 import com.pmo.supervise.task.TaskSql;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -61,9 +61,11 @@ public class MatrixService {
                     .thenComparing(MatrixRow::name);
 
     private final NamedParameterJdbcTemplate jdbc;
+    private final SourceTypeService sourceTypes;
 
-    public MatrixService(NamedParameterJdbcTemplate jdbc) {
+    public MatrixService(NamedParameterJdbcTemplate jdbc, SourceTypeService sourceTypes) {
         this.jdbc = jdbc;
+        this.sourceTypes = sourceTypes;
     }
 
     /** HTTP 入口：仅管理员 / 管理层可读（AC-16）。 */
@@ -77,7 +79,7 @@ public class MatrixService {
         MatrixFilter safeFilter = filter == null ? new MatrixFilter() : filter;
         LocalDate effectiveToday = today == null ? LocalDate.now(ShanghaiClock.ZONE) : today;
 
-        SourceType sourceType = parseSourceType(safeFilter.getSourceType());
+        String sourceType = resolveSourceType(safeFilter.getSourceType());
         DateRange range = resolveRange(safeFilter.getRange(), effectiveToday);
         boolean activeOnly = Boolean.FALSE.equals(safeFilter.getIncludeDisabled());
 
@@ -86,7 +88,7 @@ public class MatrixService {
         StringBuilder sql = new StringBuilder(MATRIX_SQL);
         if (sourceType != null) {
             sql.append(" AND t.source_type = :sourceType");
-            params.put("sourceType", sourceType.name());
+            params.put("sourceType", sourceType);
         }
         if (range != null) {
             sql.append(" AND t.due_date >= :rangeFrom AND t.due_date <= :rangeTo");
@@ -140,15 +142,12 @@ public class MatrixService {
         }
     }
 
-    private static SourceType parseSourceType(String raw) {
+    /** 来源筛选与任务池同源校验：未知编码 400，停用来源仍可筛历史（AC-5）。 */
+    private String resolveSourceType(String raw) {
         if (raw == null || raw.isBlank()) {
             return null;
         }
-        try {
-            return SourceType.of(raw.trim().toUpperCase(Locale.ROOT));
-        } catch (IllegalArgumentException ex) {
-            throw BusinessException.validation("sourceType", "来源类型不合法，可选 MEETING / PROJECT / DAILY");
-        }
+        return sourceTypes.requireKnown(raw.trim()).code();
     }
 
     /** 本周从周一起算；本月为 1 号至月末；按 due_date 过滤（AC-15）。 */

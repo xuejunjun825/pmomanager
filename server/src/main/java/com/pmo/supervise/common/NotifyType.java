@@ -5,6 +5,7 @@ public enum NotifyType {
     DUE_SOON("即将到期"),
     OVERDUE("逾期提醒"),
     URGE("催办"),
+    MENTION("被@"),
     REJECTED("验收打回"),
     REASSIGNED("任务改派"),
     RESCHEDULED("截止改期"),

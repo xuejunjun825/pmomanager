@@ -237,7 +237,15 @@ onMounted(() => {
         <h3 class="card__title" :title="task.title">{{ task.title }}</h3>
 
         <p class="card__meta">
-          <SourceTag v-if="task.source" :type="task.source.type" :meeting-title="task.source.meetingTitle" />
+          <SourceTag
+            v-if="task.source"
+            :code="task.source.type"
+            :name="task.source.typeLabel"
+            :color="task.source.color"
+            :soft-color="task.source.softColor"
+            :border-color="task.source.borderColor"
+            :meeting-title="task.source.meetingTitle"
+          />
           <span class="card__due">截止 {{ monthDay(task.dueDate) }}</span>
         </p>
 

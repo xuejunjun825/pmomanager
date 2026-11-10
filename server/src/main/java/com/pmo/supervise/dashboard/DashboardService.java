@@ -35,25 +35,6 @@ public class DashboardService {
     private static final int DEFAULT_FOCUS_LIMIT = 10;
     private static final int MAX_FOCUS_LIMIT = 50;
 
-    /** 与 TaskQueryDao 的 SELECT 列一一对应，供 TaskRowMapper.mapRow 读取。 */
-    private static final String FOCUS_SELECT = """
-            SELECT t.id, t.title, t.owner_id, u.name AS owner_name, u.role AS owner_role,
-                   t.due_date, t.source_type, t.source_meeting_id, m.title AS meeting_title,
-                   t.source_decision_item_id, t.source_note, t.status, t.priority,
-                   t.dispatcher_id, d.name AS dispatcher_name, d.role AS dispatcher_role,
-                   t.completion_note, t.completion_url, t.submitted_at, t.completed_at,
-                   t.created_at, t.updated_at,
-                   CASE WHEN %s THEN 1 ELSE 0 END AS is_overdue,
-                   CASE WHEN %s THEN DATEDIFF(:today, t.due_date) ELSE 0 END AS overdue_days,
-                   CASE WHEN %s THEN 1 ELSE 0 END AS due_soon,
-                   (SELECT COUNT(*) FROM urge_records ur WHERE ur.task_id = t.id) AS urge_count,
-                   (SELECT MAX(ur.created_at) FROM urge_records ur WHERE ur.task_id = t.id) AS last_urged_at
-            FROM tasks t
-            JOIN users u ON u.id = t.owner_id
-            JOIN users d ON d.id = t.dispatcher_id
-            LEFT JOIN meetings m ON m.id = t.source_meeting_id
-            """.formatted(TaskSql.OVERDUE, TaskSql.OVERDUE, TaskSql.DUE_SOON);
-
     /**
      * 四段桶（AC-16）：逾期 → 待开始（截止日升序）→ 待验收（提交时间升序）→ 进行中（截止日升序）。
      * 逾期段内按逾期天数降序；其余段内沿用截止日升序作为稳定次序。
@@ -145,7 +126,8 @@ public class DashboardService {
         TaskQueryBuilder.TaskQuery query = queryBuilder.build(filter, today);
         Map<String, Object> params = new LinkedHashMap<>(query.params());
         params.put("limit", limit);
-        String sql = FOCUS_SELECT + query.where() + " AND " + TaskSql.NOT_FINISHED
+        // 列集与来源 join 复用任务池的 SELECT_BASE：两处拼 SQL 迟早漂移（TECHNICAL 风险项）。
+        String sql = TaskQueryDao.selectBase() + query.where() + " AND " + TaskSql.NOT_FINISHED
                 + FOCUS_ORDER + " LIMIT :limit";
         return jdbc.query(sql, params, (rs, rowNum) -> TaskRowMapper.mapRow(rs));
     }

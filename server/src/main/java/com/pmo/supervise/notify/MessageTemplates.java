@@ -10,6 +10,7 @@ import java.time.format.DateTimeFormatter;
 public final class MessageTemplates {
 
     private static final DateTimeFormatter DATE = DateTimeFormatter.ofPattern("yyyy-MM-dd");
+    private static final int MENTION_EXCERPT_CODE_POINTS = 100;
 
     private MessageTemplates() {
     }
@@ -50,5 +51,24 @@ public final class MessageTemplates {
     public static String rescheduledBody(String taskTitle, LocalDate from, LocalDate to, String reason) {
         return "任务「" + taskTitle + "」截止日期由 " + DATE.format(from) + " 调整为 " + DATE.format(to)
                 + "。\n\n> " + reason;
+    }
+
+    /** 被@标题：{作者} 在任务《{标题}》中@了你。 */
+    public static String mentionTitle(String actorName, String taskTitle) {
+        return actorName + " 在任务《" + taskTitle + "》中@了你";
+    }
+
+    /**
+     * 被@正文：进度内容截到 100 个 code point 再补省略号。
+     * 按 code point 截断才不会把 emoji 的代理对切坏。
+     */
+    public static String mentionBody(String content) {
+        String value = content == null ? "" : content.trim();
+        int codePoints = value.codePointCount(0, value.length());
+        if (codePoints <= MENTION_EXCERPT_CODE_POINTS) {
+            return value;
+        }
+        int end = value.offsetByCodePoints(0, MENTION_EXCERPT_CODE_POINTS);
+        return value.substring(0, end) + "…";
     }
 }

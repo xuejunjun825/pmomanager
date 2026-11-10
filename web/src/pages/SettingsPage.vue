@@ -2,8 +2,9 @@
 /**
  * 系统设置（DESIGN §4.11 / AC-20 / AC-21）。
  *
- * 三块卡片：收件人 / 报表开关 / 钉钉配置状态。
+ * 四块卡片：收件人 / 报表开关 / 来源配置 / 钉钉配置状态。
  * - 收件人为空是**允许保存**的状态，但必须醒目提示「日报/周报将不会发送」；
+ * - 来源配置即时生效（行内操作直接落库），**不参与页面级「未保存变更」拦截**；
  * - 钉钉配置只读展示缺失项名称，密钥永不回显，未配置不红色告警；
  * - 保存后重新 GET，以服务端返回为准，不在前端猜 PUT 的响应体。
  */
@@ -15,13 +16,15 @@ import AppInput from '@/components/ui/AppInput.vue'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 import ErrorState from '@/components/ui/ErrorState.vue'
 import PageHeader from '@/components/ui/PageHeader.vue'
+import SourceTypeTable from '@/components/settings/SourceTypeTable.vue'
 import { settingsApi } from '@/api/settings'
+import { sourceTypesApi } from '@/api/sourceTypes'
 import { usersApi } from '@/api/users'
 import { toApiError, type ApiError } from '@/api/http'
 import { useToast } from '@/composables/useToast'
 import { formatDateTime } from '@/utils/format'
 import { ROLE_LABELS, type Role } from '@/types/enums'
-import type { UserOption } from '@/types/api'
+import type { SourcePaletteEntry, SourceTypeRow, UserOption } from '@/types/api'
 
 interface Picked {
   id: number
@@ -62,6 +65,12 @@ const roster = ref<UserOption[]>([])
 const rosterLoading = ref(false)
 const rosterError = ref('')
 const peopleKeyword = ref('')
+
+/** 来源配置是独立数据源：与报表设置分开加载，加载失败不拖垮整页 */
+const sourceTypes = ref<SourceTypeRow[]>([])
+const palette = ref<SourcePaletteEntry[]>([])
+const sourceLoading = ref(true)
+const sourceError = ref('')
 
 const leaveDialog = ref(false)
 let allowLeave = false
@@ -214,6 +223,21 @@ function onBeforeUnload(event: BeforeUnloadEvent): void {
   event.returnValue = ''
 }
 
+async function loadSources(): Promise<void> {
+  sourceLoading.value = true
+  sourceError.value = ''
+  try {
+    const [rows, entries] = await Promise.all([sourceTypesApi.list(), sourceTypesApi.palette()])
+    sourceTypes.value = rows
+    palette.value = entries
+  } catch (e) {
+    const apiError = toApiError(e)
+    sourceError.value = apiError.message || '来源配置加载失败，请重试。'
+  } finally {
+    sourceLoading.value = false
+  }
+}
+
 watch(dirty, (value) => {
   if (value) window.addEventListener('beforeunload', onBeforeUnload)
   else window.removeEventListener('beforeunload', onBeforeUnload)
@@ -222,6 +246,7 @@ watch(dirty, (value) => {
 onMounted(() => {
   void load()
   void loadRoster()
+  void loadSources()
 })
 
 onBeforeUnmount(() => {
@@ -231,7 +256,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="settings">
-    <PageHeader title="系统设置" description="报表生效范围与钉钉部署状态；配置改动即时留痕。">
+    <PageHeader title="系统设置" description="报表生效范围、来源类型与钉钉部署状态；配置改动即时留痕。">
       <template #meta>
         <p v-if="updatedAt" class="settings__stamp">上次更新 {{ formatDateTime(updatedAt) }}</p>
       </template>
@@ -239,7 +264,7 @@ onBeforeUnmount(() => {
 
     <div v-if="loading" class="settings__loading" aria-busy="true" aria-live="polite">
       <span class="visually-hidden">正在加载设置</span>
-      <div v-for="n in 3" :key="`sk-${n}`" class="card card--skeleton">
+      <div v-for="n in 4" :key="`sk-${n}`" class="card card--skeleton">
         <span class="sk-block sk-title" />
         <span class="sk-block sk-line" />
         <span class="sk-block sk-line sk-line--short" />
@@ -388,7 +413,26 @@ onBeforeUnmount(() => {
         <p v-if="timeError" class="row__error" role="alert">{{ timeError }}</p>
       </section>
 
-      <!-- ③ 钉钉配置状态（只读） -->
+      <!-- ③ 来源配置（即时生效，不参与本页「未保存」拦截） -->
+      <section id="source-types" class="card" aria-labelledby="source-types-title">
+        <header class="card__head card__head--inline">
+          <div>
+            <h2 id="source-types-title" class="card__title">来源配置</h2>
+            <p class="card__desc">
+              任务来源的可选类型、形态与标签颜色；行内改动即时生效，无需保存。
+            </p>
+          </div>
+        </header>
+        <SourceTypeTable
+          :items="sourceTypes"
+          :palette="palette"
+          :loading="sourceLoading"
+          :error="sourceError"
+          @refresh="loadSources"
+        />
+      </section>
+
+      <!-- ④ 钉钉配置状态（只读） -->
       <section class="card" aria-labelledby="dingtalk-title">
         <header class="card__head card__head--inline">
           <div>

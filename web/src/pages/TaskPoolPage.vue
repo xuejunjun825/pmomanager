@@ -73,6 +73,10 @@ let seq = 0
 const canCreate = computed(() => auth.role === 'ADMIN')
 const owners = computed<UserOption[]>(() => (Array.isArray(meta.value?.owners) ? meta.value!.owners : []))
 const meetings = computed(() => (Array.isArray(meta.value?.meetings) ? meta.value!.meetings : []))
+/** meta 全量（含已停用）：筛选要能筛历史，建任务抽屉只取可用的（AC-5） */
+const sourceTypes = computed(() =>
+  Array.isArray(meta.value?.sourceTypes) ? meta.value!.sourceTypes : [],
+)
 
 /** 筛选条与 URL 状态之间的唯一映射（URL 用短键，符合 DESIGN 的可分享形状） */
 const filters = computed<PoolFilters>(() => ({
@@ -121,7 +125,14 @@ async function load(): Promise<void> {
     total.value = Number(page?.total ?? 0) || 0
   } catch (caught) {
     if (current !== seq) return
-    error.value = toApiError(caught)
+    const apiError = toApiError(caught)
+    // 旧链接 / 手改 URL 带来未知来源编码 → 400：提示并去掉该筛选项重取，不白屏（DESIGN §3.7）
+    if (apiError.code === 'SOURCE_TYPE_INVALID' && state.value.source) {
+      state.value.source = ''
+      toast.warning('来源类型不合法，已按全部来源展示')
+      return
+    }
+    error.value = apiError
     items.value = []
     total.value = 0
   } finally {
@@ -233,6 +244,7 @@ onBeforeUnmount(() => {
       :model-value="filters"
       :owners="owners"
       :meetings="meetings"
+      :source-types="sourceTypes"
       :loading="loading"
       @update:model-value="onFilters"
     />
@@ -295,6 +307,7 @@ onBeforeUnmount(() => {
       :open="drawerOpen"
       :owners="owners"
       :meetings="meetings"
+      :source-types="sourceTypes"
       @close="drawerOpen = false"
       @saved="onCreated"
     />

@@ -109,4 +109,60 @@
   --nav-w-collapsed: 64px;
   --topbar-h: 56px;
   --content-max: 1440px;
+
+  /* 来源色板（DESIGN §1.2）：运行期真源是后端 SourcePalette 下发的三元组，
+     这里只是设计参考与兜底（未知/未下发颜色时标签回落 slate）。前三个与 r1 逐像素一致。 */
+  --src-blue-text: #1b4d8f;
+  --src-blue-soft: #eaf1fa;
+  --src-blue-border: #c7d9ef;
+  --src-purple-text: #6941c6;
+  --src-purple-soft: #f4f3ff;
+  --src-purple-border: #d9d6fe;
+  --src-slate-text: #475467;
+  --src-slate-soft: #f2f4f7;
+  --src-slate-border: #e4e7ec;
+  --src-teal-text: #0b7a6e;
+  --src-teal-soft: #f0fdfa;
+  --src-teal-border: #99f6e4;
+  --src-green-text: #067647;
+  --src-green-soft: #ecfdf3;
+  --src-green-border: #abefc6;
+  --src-amber-text: #b54708;
+  --src-amber-soft: #fffaeb;
+  --src-amber-border: #fedf89;
+  --src-indigo-text: #3538cd;
+  --src-indigo-soft: #eef4ff;
+  --src-indigo-border: #c7d7fe;
+  --src-olive-text: #3f6212;
+  --src-olive-soft: #f3f6e8;
+  --src-olive-border: #c9d6a4;
+
+  /* 架构蓝图命名的别名（--c-source-*），与上面同源，避免下游 var() 静默失效 */
+  --c-source-blue: var(--src-blue-text);
+  --c-source-blue-soft: var(--src-blue-soft);
+  --c-source-blue-border: var(--src-blue-border);
+  --c-source-purple: var(--src-purple-text);
+  --c-source-purple-soft: var(--src-purple-soft);
+  --c-source-purple-border: var(--src-purple-border);
+  --c-source-slate: var(--src-slate-text);
+  --c-source-slate-soft: var(--src-slate-soft);
+  --c-source-slate-border: var(--src-slate-border);
+  --c-source-teal: var(--src-teal-text);
+  --c-source-teal-soft: var(--src-teal-soft);
+  --c-source-teal-border: var(--src-teal-border);
+  --c-source-green: var(--src-green-text);
+  --c-source-green-soft: var(--src-green-soft);
+  --c-source-green-border: var(--src-green-border);
+  --c-source-amber: var(--src-amber-text);
+  --c-source-amber-soft: var(--src-amber-soft);
+  --c-source-amber-border: var(--src-amber-border);
+  --c-source-indigo: var(--src-indigo-text);
+  --c-source-indigo-soft: var(--src-indigo-soft);
+  --c-source-indigo-border: var(--src-indigo-border);
+  --c-source-olive: var(--src-olive-text);
+  --c-source-olive-soft: var(--src-olive-soft);
+  --c-source-olive-border: var(--src-olive-border);
+
+  /* 深链锚点高亮底色（#progress-{id}，1600ms 后淡出） */
+  --hl-anchor: #fff4e5;
 }

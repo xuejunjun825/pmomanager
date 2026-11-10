@@ -31,6 +31,9 @@ public abstract class IntegrationTestSupport {
     @BeforeEach
     void resetDatabase() {
         jdbc.execute("DELETE FROM notifications");
+        // 进度是 tasks 的子表（V5 的外键），必须比 tasks 先清。
+        jdbc.execute("DELETE FROM task_progress_mentions");
+        jdbc.execute("DELETE FROM task_progress");
         jdbc.execute("DELETE FROM urge_records");
         jdbc.execute("DELETE FROM task_events");
         jdbc.execute("DELETE FROM tasks");

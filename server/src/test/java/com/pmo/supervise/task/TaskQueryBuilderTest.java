@@ -2,6 +2,9 @@ package com.pmo.supervise.task;
 
 import com.pmo.supervise.common.BusinessException;
 import com.pmo.supervise.common.ErrorCode;
+import com.pmo.supervise.source.SourceForm;
+import com.pmo.supervise.source.SourceTypeDao;
+import com.pmo.supervise.source.SourceTypeService;
 import com.pmo.supervise.task.dto.TaskFilter;
 import org.junit.jupiter.api.Test;
 
@@ -13,7 +16,15 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 /** WHERE / ORDER BY 编译（TECHNICAL §5.6）：条件全部走命名参数，非法输入 422。 */
 class TaskQueryBuilderTest {
 
-    private final TaskQueryBuilder builder = new TaskQueryBuilder();
+    /** 真实 Service 的轻量替身：本用例只关心「筛选编码经配置归一」这一件事。 */
+    private final SourceTypeService sourceTypes = new SourceTypeService(null, null) {
+        @Override
+        public SourceTypeDao.SourceTypeConfig requireKnown(String code) {
+            return new SourceTypeDao.SourceTypeConfig(1L, "MEETING", "会议决议",
+                    SourceForm.MEETING, "#1B4D8F", 0, true);
+        }
+    };
+    private final TaskQueryBuilder builder = new TaskQueryBuilder(sourceTypes);
     private final LocalDate today = LocalDate.of(2026, 11, 9);
 
     @Test

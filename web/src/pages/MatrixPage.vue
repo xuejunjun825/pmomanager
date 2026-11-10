@@ -14,11 +14,12 @@ import SkeletonTable from '@/components/ui/SkeletonTable.vue'
 import MatrixCell from '@/components/ui/MatrixCell.vue'
 import { useQuerySync, type QueryKinds } from '@/composables/useQuerySync'
 import { matrixApi, matrixDrilldown, MATRIX_BUCKETS, type MatrixBucketKey } from '@/api/matrix'
+import { metaApi } from '@/api/meta'
 import { toApiError, type ApiError } from '@/api/http'
+import { useToast } from '@/composables/useToast'
 import { formatNumber, formatPercent } from '@/utils/format'
-import { SOURCE_TYPES, SOURCE_TYPE_LABELS } from '@/types/enums'
 import type { MatrixRange, SourceType } from '@/types/enums'
-import type { MatrixRow, MatrixView } from '@/types/api'
+import type { MatrixRow, MatrixView, SourceTypeOption } from '@/types/api'
 import type { SelectOption } from '@/components/ui/AppSelect.vue'
 
 interface MatrixQueryState {
@@ -32,16 +33,32 @@ const KINDS: QueryKinds<MatrixQueryState> = { activeOnly: 'boolean' }
 
 const { state, apply } = useQuerySync<MatrixQueryState>(DEFAULTS, KINDS)
 
+const toast = useToast()
+
 const RANGES: { value: MatrixRange; label: string }[] = [
   { value: 'WEEK', label: '本周' },
   { value: 'MONTH', label: '本月' },
   { value: 'ALL', label: '全部' },
 ]
 
-const sourceOptions: SelectOption[] = [
-  { label: '全部来源', value: '' },
-  ...SOURCE_TYPES.map((type) => ({ label: SOURCE_TYPE_LABELS[type], value: type })),
-]
+/**
+ * 来源下拉与任务池共用 meta 全量（含已停用），不写死三类（AC-5）：
+ * 启用项按 sort 在前，停用项在后并标注「（已停用）」，历史任务的来源仍可筛。
+ */
+const sourceTypes = ref<SourceTypeOption[]>([])
+const sourceOptions = computed<SelectOption[]>(() => {
+  const ordered = [...sourceTypes.value].sort((a, b) => {
+    if (a.enabled !== b.enabled) return a.enabled ? -1 : 1
+    return a.sort - b.sort
+  })
+  return [
+    { label: '全部来源', value: '' },
+    ...ordered.map((item) => ({
+      label: item.enabled === false ? `${item.label}（已停用）` : item.label,
+      value: item.value,
+    })),
+  ]
+})
 
 const view = ref<MatrixView | null>(null)
 const loading = ref(false)
@@ -89,14 +106,33 @@ async function load(): Promise<void> {
     view.value = next
   } catch (err) {
     if (current !== seq) return
-    error.value = toApiError(err)
+    const apiError = toApiError(err)
+    // 旧链接 / 手改 URL 带来未知来源编码 → 400：提示并去掉该筛选项重取，不白屏（DESIGN §3.7）
+    if (apiError.code === 'SOURCE_TYPE_INVALID' && state.value.source) {
+      state.value.source = ''
+      toast.warning('来源类型不合法，已按全部来源展示')
+      return
+    }
+    error.value = apiError
     view.value = null
   } finally {
     if (current === seq) loading.value = false
   }
 }
 
-onMounted(load)
+onMounted(() => {
+  void load()
+  void loadSourceOptions()
+})
+
+async function loadSourceOptions(): Promise<void> {
+  try {
+    const meta = await metaApi.options()
+    sourceTypes.value = meta.sourceTypes ?? []
+  } catch {
+    /* 选项加载失败只影响来源下拉，不阻塞矩阵本体 */
+  }
+}
 watch(
   () => [state.value.source, range.value, state.value.activeOnly],
   () => {

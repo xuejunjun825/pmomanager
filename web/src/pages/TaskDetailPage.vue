@@ -6,7 +6,7 @@
  * - 409 之后立刻重取详情，界面不能停在旧状态；
  * - 逾期只展示 isOverdue / overdueDays，不做任何日期推算（AC-11）。
  */
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import OwnerChip from '@/components/ui/OwnerChip.vue'
 import StatusBadge from '@/components/ui/StatusBadge.vue'
@@ -17,14 +17,16 @@ import TaskActions from '@/components/task/TaskActions.vue'
 import TransitionTimeline from '@/components/task/TransitionTimeline.vue'
 import UrgeButton from '@/components/task/UrgeButton.vue'
 import TaskFormDrawer from '@/components/task/TaskFormDrawer.vue'
+import ProgressComposer from '@/components/task/ProgressComposer.vue'
+import ProgressTimeline from '@/components/task/ProgressTimeline.vue'
 import { taskApi } from '@/api/tasks'
 import { metaApi } from '@/api/meta'
 import { toApiError, type ApiError } from '@/api/http'
 import { useAuthStore } from '@/stores/auth'
 import { formatDate, formatDateTime, formatUrgeSummary } from '@/utils/format'
-import { PRIORITY_LABELS, SOURCE_TYPE_LABELS, TASK_STATUS_LABELS } from '@/types/enums'
+import { PRIORITY_LABELS, TASK_STATUS_LABELS } from '@/types/enums'
 import type { TaskStatus } from '@/types/enums'
-import type { MetaOptions, TaskDetail, UrgeResult, UserOption } from '@/types/api'
+import type { MetaOptions, ProgressRow, TaskDetail, UrgeResult, UserOption } from '@/types/api'
 
 const route = useRoute()
 const router = useRouter()
@@ -36,10 +38,88 @@ const error = ref<ApiError | null>(null)
 const meta = ref<MetaOptions | null>(null)
 const editOpen = ref(false)
 
+/* ---- 进度与 @（AC-7/8/10）：与详情并行加载，失败不阻塞详情 ---- */
+const progress = ref<ProgressRow[]>([])
+const progressTotal = ref(0)
+const progressLoading = ref(true)
+const progressError = ref<ApiError | null>(null)
+const bannerDismissed = ref(false)
+let anchorTimer: ReturnType<typeof setTimeout> | undefined
+
+const mentionOnly = computed(() => detail.value?.permissions?.mentionOnly === true)
+const mentionerName = computed(
+  () => progress.value.find((row) => row.mentionedMe)?.author?.name || '同事',
+)
+
 const taskId = computed(() => Number(route.params.id))
 const canEdit = computed(() => auth.role === 'ADMIN')
 const owners = computed<UserOption[]>(() => (Array.isArray(meta.value?.owners) ? meta.value!.owners : []))
 const meetings = computed(() => (Array.isArray(meta.value?.meetings) ? meta.value!.meetings : []))
+const sourceTypes = computed(() => (Array.isArray(meta.value?.sourceTypes) ? meta.value!.sourceTypes : []))
+
+/* ---- 通知深链 #progress-{id}：定位 + 1600ms 高亮 + 聚焦 ---- */
+const anchorProgressId = computed(() => {
+  const match = /^#progress-(\d+)$/.exec(route.hash || '')
+  return match ? Number(match[1]) : 0
+})
+
+function locateAnchor(): void {
+  const id = anchorProgressId.value
+  if (!id) return
+  const element = document.getElementById(`progress-${id}`)
+  if (!element) return
+  if (typeof element.scrollIntoView === 'function') element.scrollIntoView({ block: 'center' })
+  element.classList.add('is-anchor')
+  if (typeof (element as HTMLElement).focus === 'function') {
+    ;(element as HTMLElement).focus({ preventScroll: true })
+  }
+  window.clearTimeout(anchorTimer)
+  anchorTimer = window.setTimeout(() => element.classList.remove('is-anchor'), 1600)
+}
+
+function bannerKey(): string {
+  return `mention-banner-${taskId.value}`
+}
+
+function readBannerDismissed(): boolean {
+  try {
+    return sessionStorage.getItem(bannerKey()) === '1'
+  } catch {
+    return false
+  }
+}
+
+function dismissBanner(): void {
+  bannerDismissed.value = true
+  try {
+    sessionStorage.setItem(bannerKey(), '1')
+  } catch {
+    // 隐私模式下 sessionStorage 不可用：本次会话内记住即可
+  }
+}
+
+async function loadProgress(): Promise<void> {
+  progressLoading.value = true
+  progressError.value = null
+  try {
+    const data = await taskApi.progress(taskId.value, { limit: 50 })
+    progress.value = Array.isArray(data?.items) ? data.items : []
+    progressTotal.value = Number(data?.total ?? progress.value.length)
+  } catch (caught) {
+    progressError.value = toApiError(caught)
+  } finally {
+    progressLoading.value = false
+  }
+  await nextTick()
+  locateAnchor()
+}
+
+/** 提交成功：服务端返回行直接前插，1 秒内出现在时间线（不整页重取） */
+function onProgressCreated(row: ProgressRow): void {
+  progress.value = [row, ...progress.value]
+  progressTotal.value += 1
+  void nextTick(() => locateAnchor())
+}
 
 const STEPS: TaskStatus[] = ['PENDING', 'IN_PROGRESS', 'PENDING_ACCEPT', 'DONE']
 
@@ -50,10 +130,11 @@ const stepIndex = computed(() => {
 
 const cancelled = computed(() => detail.value?.status === 'CANCELLED')
 
+/** 名称来自服务端 join 的 source_types（AC-5），本地不再有第二套标签表 */
 const sourceLabel = computed(() => {
   const source = detail.value?.source
   if (!source) return '—'
-  return SOURCE_TYPE_LABELS[source.type] ?? source.type
+  return source.typeLabel ?? source.type
 })
 
 const urgeSummary = computed(() => {
@@ -127,10 +208,22 @@ function onSaved(next: TaskDetail): void {
   editOpen.value = false
 }
 
-watch(taskId, () => void load())
+watch(taskId, () => {
+  bannerDismissed.value = readBannerDismissed()
+  void load()
+  void loadProgress()
+})
+
+watch([progress, () => route.hash], () => {
+  void nextTick(() => locateAnchor())
+})
+
+onBeforeUnmount(() => window.clearTimeout(anchorTimer))
 
 onMounted(() => {
+  bannerDismissed.value = readBannerDismissed()
   void load()
+  void loadProgress()
   void loadMeta()
 })
 </script>
@@ -160,6 +253,17 @@ onMounted(() => {
     />
 
     <template v-else-if="detail">
+      <!-- 被 @ 人视角（AC-11）：可读 + 可补进度，状态动作整组不渲染 -->
+      <div v-if="mentionOnly && !bannerDismissed" class="mention-banner" role="status">
+        <span class="mention-banner__icon" aria-hidden="true">@</span>
+        <p class="mention-banner__text">
+          你被 {{ mentionerName }} @ 过，可查看并补充进度；状态操作仅负责人与管理员可用。
+        </p>
+        <button type="button" class="mention-banner__close" aria-label="关闭提示" @click="dismissBanner">
+          ×
+        </button>
+      </div>
+
       <header class="head">
         <div class="head__main">
           <h1 class="head__title">{{ detail.title }}</h1>
@@ -218,7 +322,15 @@ onMounted(() => {
             <h2 class="panel__title">来源</h2>
             <div class="source">
               <div class="source__head">
-                <SourceTag v-if="detail.source" :type="detail.source.type" :meeting-title="detail.source.meetingTitle" />
+                <SourceTag
+                  v-if="detail.source"
+                  :code="detail.source.type"
+                  :name="detail.source.typeLabel"
+                  :color="detail.source.color"
+                  :soft-color="detail.source.softColor"
+                  :border-color="detail.source.borderColor"
+                  :meeting-title="detail.source.meetingTitle"
+                />
                 <span class="source__type">{{ sourceLabel }}</span>
               </div>
               <template v-if="detail.source?.type === 'MEETING'">

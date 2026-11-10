@@ -27,7 +27,8 @@ public class TaskQueryDao {
 
     private static final String SELECT_BASE = """
             SELECT t.id, t.title, t.owner_id, u.name AS owner_name, u.role AS owner_role,
-                   t.due_date, t.source_type, t.source_meeting_id, m.title AS meeting_title,
+                   t.due_date, t.source_type, st.name AS source_name, st.color AS source_color,
+                   t.source_meeting_id, m.title AS meeting_title,
                    t.source_decision_item_id, t.source_note, t.status, t.priority,
                    t.dispatcher_id, d.name AS dispatcher_name, d.role AS dispatcher_role,
                    t.completion_note, t.completion_url, t.submitted_at, t.completed_at,
@@ -41,6 +42,7 @@ public class TaskQueryDao {
             JOIN users u ON u.id = t.owner_id
             JOIN users d ON d.id = t.dispatcher_id
             LEFT JOIN meetings m ON m.id = t.source_meeting_id
+            LEFT JOIN source_types st ON st.code = t.source_type
             """.formatted(TaskSql.OVERDUE, TaskSql.OVERDUE, TaskSql.DUE_SOON);
 
     private static final String COUNT_BASE = """
@@ -80,6 +82,14 @@ public class TaskQueryDao {
         List<TaskDetailRow> rows = jdbc.query(
                 SELECT_BASE + " WHERE t.id = :id", params, (rs, rowNum) -> TaskRowMapper.mapDetail(rs));
         return rows.stream().findFirst();
+    }
+
+    /**
+     * 任务行读模型的唯一列集 + join（含 source_types 取名取色）。
+     * 看板焦点列表也复用同一份，来源 join 不会两处各拼一次而漂移。
+     */
+    public static String selectBase() {
+        return SELECT_BASE;
     }
 
     /** 焦点列表：未完成优先，逾期在前，其次按截止日升序。 */

@@ -8,6 +8,7 @@ import type {
   NotifyType,
   Priority,
   Role,
+  SourceForm,
   SourceType,
   TaskStatus,
   UserStatus,
@@ -169,9 +170,16 @@ export interface ConvertResult {
 
 /* ---------------------------------------------------------------- 任务 */
 
+/**
+ * 任务来源读模型（TECHNICAL §3.4）。名称与三色由后端 LEFT JOIN source_types 下发，
+ * 前端不再按 code 分支；缺字段（老接口/夹具）时标签回落 slate 与「未知来源（CODE）」。
+ */
 export interface TaskSource {
   type: SourceType
   typeLabel?: string
+  color?: string | null
+  softColor?: string | null
+  borderColor?: string | null
   meetingId?: number | null
   meetingTitle?: string | null
   decisionItemId?: number | null
@@ -217,6 +225,10 @@ export interface TaskPermissions {
   canReassign: boolean
   canReschedule: boolean
   canUrge: boolean
+  /** 可追加进度（管理员/管理层/负责人/被@），与 canView 同一口径（TECHNICAL §3.7） */
+  canAddProgress?: boolean
+  /** 仅被@可见的只读视角：页面整组隐藏状态动作，接口侧仍 403 兜底（AC-8） */
+  mentionOnly?: boolean
   /** 键为动作名，值为禁用原因（服务端给出，前端直接展示） */
   disabledReasons: Record<string, string>
 }
@@ -288,6 +300,8 @@ export interface NotificationRow {
   read: boolean
   /** 钉钉已尝试次数 */
   retryCount: number
+  /** MENTION 通知对应的进度 id，用于深链 #progress-{id}（不解析 dedup_key） */
+  progressId?: number | null
   /** 最近一次失败原因；成功/未失败时为 null */
   failureReason?: string | null
 }
@@ -379,12 +393,81 @@ export interface UpdateReportSettingsRequest {
   recipientIds: number[]
 }
 
+/* ---------------------------------------------------------------- 来源配置 */
+
+/** 来源下拉项（meta.sourceTypes）：同时驱动下拉、筛选与标签颜色，一份数据三处复用（AC-5） */
+export interface SourceTypeOption {
+  value: SourceType
+  label: string
+  color: string
+  softColor: string
+  borderColor: string
+  form: SourceForm
+  enabled: boolean
+  sort: number
+}
+
+/** 设置页来源表格行（SourceTypeView）：code 是业务主键，表单里只读展示 */
+export interface SourceTypeRow {
+  code: SourceType
+  name: string
+  form: SourceForm
+  color: string
+  softColor: string
+  borderColor: string
+  sort: number
+  enabled: boolean
+  builtin: boolean
+  locked: boolean
+  usageCount: number
+}
+
+/** 新增 / 编辑来源请求体（编码由后端生成，编辑时不可改） */
+export interface SourceTypePayload {
+  name: string
+  form: SourceForm
+  color: string
+  sort?: number | null
+}
+
+/** 8 组色板条目（后端下发，前端不硬编码色值） */
+export interface SourcePaletteEntry {
+  color: string
+  soft: string
+  border: string
+  name: string
+}
+
+/* ---------------------------------------------------------------- 进度 */
+
+export interface ProgressRow {
+  id: number
+  content: string
+  author: UserRef
+  mentions: UserRef[]
+  /** 这条进度是否 @ 了我 */
+  mentionedMe: boolean
+  createdAt: string
+}
+
+export interface ProgressPage {
+  items: ProgressRow[]
+  /** 全部进度条数，同时驱动 200 条上限的禁用态 */
+  total: number
+  hasMore: boolean
+}
+
+export interface AddProgressPayload {
+  content: string
+  mentionedUserIds?: number[]
+}
+
 /* ---------------------------------------------------------------- 元数据 */
 
 export interface MetaOptions {
   owners: UserOption[]
   meetings: Array<{ id: number; title: string; meetingDate?: string }>
-  sourceTypes: Array<{ value: SourceType; label: string }>
+  sourceTypes: SourceTypeOption[]
   statuses: Array<{ value: TaskStatus; label: string }>
   priorities: Array<{ value: Priority; label: string }>
 }

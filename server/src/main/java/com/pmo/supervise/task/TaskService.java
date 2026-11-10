@@ -5,14 +5,17 @@ import com.pmo.supervise.common.BusinessException;
 import com.pmo.supervise.common.ErrorCode;
 import com.pmo.supervise.common.Priority;
 import com.pmo.supervise.common.Role;
-import com.pmo.supervise.common.SourceType;
 import com.pmo.supervise.common.TaskStatus;
+import com.pmo.supervise.source.SourceForm;
+import com.pmo.supervise.source.SourceTypeDao.SourceTypeConfig;
+import com.pmo.supervise.source.SourceTypeService;
 import com.pmo.supervise.task.dto.CreateTaskRequest;
 import com.pmo.supervise.task.dto.TaskDetailRow;
 import com.pmo.supervise.task.dto.TaskEventRow;
 import com.pmo.supervise.task.dto.TaskPermissions;
 import com.pmo.supervise.task.dto.UpdateTaskRequest;
 import com.pmo.supervise.task.dto.UserRef;
+import com.pmo.supervise.task.progress.TaskProgressDao;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -33,26 +36,31 @@ public class TaskService {
     private final TaskQueryDao queryDao;
     private final TaskAccessGuard guard;
     private final JdbcTemplate jdbc;
+    private final SourceTypeService sourceTypes;
+    private final TaskProgressDao progressDao;
 
     public TaskService(TaskRepository taskRepository, TaskQueryDao queryDao,
-                       TaskAccessGuard guard, JdbcTemplate jdbc) {
+                       TaskAccessGuard guard, JdbcTemplate jdbc,
+                       SourceTypeService sourceTypes, TaskProgressDao progressDao) {
         this.taskRepository = taskRepository;
         this.queryDao = queryDao;
         this.guard = guard;
         this.jdbc = jdbc;
+        this.sourceTypes = sourceTypes;
+        this.progressDao = progressDao;
     }
 
     @Transactional
     public TaskDetailRow create(Actor actor, CreateTaskRequest req, LocalDate today) {
         guard.requireAdmin(actor);
         validateOwner(req.ownerId());
-        validateSource(req);
+        SourceTypeConfig source = validateSource(req);
 
         Task task = new Task();
         task.setTitle(req.title().trim());
         task.setOwnerId(req.ownerId());
         task.setDueDate(req.dueDate());
-        task.setSourceType(req.sourceType());
+        task.setSourceType(source.code());
         task.setSourceMeetingId(req.sourceMeetingId());
         task.setSourceDecisionItemId(req.sourceDecisionItemId());
         task.setSourceNote(req.sourceNote() == null || req.sourceNote().isBlank() ? null : req.sourceNote().trim());
@@ -155,8 +163,15 @@ public class TaskService {
             reasons.put("urge", "任务已结束");
         }
 
+        // 被 @ 的人拿到「只读可见 + 续写进度」视角：状态动作整组隐藏，接口侧仍 403 兜底（AC-8）。
+        boolean globalReader = actor.isAdmin() || actor.isExec();
+        boolean mentioned = !globalReader && task.getOwnerId() != actor.id()
+                && progressDao.isMentioned(task.getId(), actor.id());
+        boolean canAddProgress = globalReader || task.getOwnerId() == actor.id() || mentioned;
+        boolean mentionOnly = mentioned;
+
         return new TaskPermissions(canStart, canSubmit, canAccept, canReject, canCancel, canRestore,
-                canForceComplete, canReassign, canReschedule, canUrge, reasons);
+                canForceComplete, canReassign, canReschedule, canUrge, canAddProgress, mentionOnly, reasons);
     }
 
     private void validateOwner(long ownerId) {
@@ -170,36 +185,38 @@ public class TaskService {
         }
     }
 
-    private void validateSource(CreateTaskRequest req) {
+    /**
+     * 来源校验（TECHNICAL §4.2）：形态由配置驱动——MEETING 绑会议与决议项，NOTE 填自由说明。
+     * 编码必须存在且启用，形态规则只在这一次判断，库层 CHECK 只兜结构互斥。
+     */
+    private SourceTypeConfig validateSource(CreateTaskRequest req) {
+        SourceTypeConfig config = sourceTypes.requireEnabled(req.sourceType());
         Map<String, String> fields = new LinkedHashMap<>();
-        switch (req.sourceType()) {
-            case MEETING -> {
-                if (req.sourceMeetingId() == null) {
-                    fields.put("sourceMeetingId", "会议来源必须选择会议");
-                }
-                if (req.sourceDecisionItemId() == null) {
-                    fields.put("sourceDecisionItemId", "会议来源必须选择决议项");
-                }
-                if (req.sourceNote() != null && !req.sourceNote().isBlank()) {
-                    fields.put("sourceNote", "会议来源不需要填写说明");
-                }
+        if (config.form() == SourceForm.MEETING) {
+            if (req.sourceMeetingId() == null) {
+                fields.put("sourceMeetingId", "会议来源必须选择会议");
             }
-            case PROJECT, DAILY -> {
-                if (req.sourceNote() == null || req.sourceNote().isBlank()) {
-                    fields.put("sourceNote", "请填写来源说明");
-                }
-                if (req.sourceMeetingId() != null) {
-                    fields.put("sourceMeetingId", "非会议来源不能关联会议");
-                }
-                if (req.sourceDecisionItemId() != null) {
-                    fields.put("sourceDecisionItemId", "非会议来源不能关联决议项");
-                }
+            if (req.sourceDecisionItemId() == null) {
+                fields.put("sourceDecisionItemId", "会议来源必须选择决议项");
+            }
+            if (req.sourceNote() != null && !req.sourceNote().isBlank()) {
+                fields.put("sourceNote", "会议来源不需要填写说明");
+            }
+        } else {
+            if (req.sourceNote() == null || req.sourceNote().isBlank()) {
+                fields.put("sourceNote", "请填写来源说明");
+            }
+            if (req.sourceMeetingId() != null) {
+                fields.put("sourceMeetingId", "非会议来源不能关联会议");
+            }
+            if (req.sourceDecisionItemId() != null) {
+                fields.put("sourceDecisionItemId", "非会议来源不能关联决议项");
             }
         }
         if (!fields.isEmpty()) {
             throw BusinessException.validation(fields);
         }
-        if (req.sourceType() == SourceType.MEETING) {
+        if (config.form() == SourceForm.MEETING) {
             List<Long> meetingIds = jdbc.query(
                     "SELECT id FROM meetings WHERE id = ?", (rs, i) -> rs.getLong(1), req.sourceMeetingId());
             if (meetingIds.isEmpty()) {
@@ -218,6 +235,7 @@ public class TaskService {
                 throw BusinessException.validation("sourceDecisionItemId", "该决议项已转任务");
             }
         }
+        return config;
     }
 
     public static UserRef ref(long id, String name) {

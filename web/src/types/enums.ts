@@ -40,14 +40,18 @@ export function isFinishedStatus(status: TaskStatus | string | null | undefined)
   return status === 'DONE' || status === 'CANCELLED'
 }
 
-export type SourceType = 'MEETING' | 'PROJECT' | 'DAILY'
+/**
+ * 任务来源（TECHNICAL §3.4）：编码由后端 `source_types` 配置表下发，前端不再有固定三类。
+ * 名称与三色一律来自接口（任务行的 source / meta.sourceTypes），本地不保留第二套显示口径。
+ */
+export type SourceType = string
 
-export const SOURCE_TYPES: readonly SourceType[] = ['MEETING', 'PROJECT', 'DAILY'] as const
+/** 来源形态（有限业务枚举，不是可配置数据）：决定建任务时是否需要绑定会议 */
+export type SourceForm = 'MEETING' | 'NOTE'
 
-export const SOURCE_TYPE_LABELS: Record<SourceType, string> = {
-  MEETING: '会议决议',
-  PROJECT: '项目任务',
-  DAILY: '日常待办',
+export const SOURCE_FORM_LABELS: Record<SourceForm, string> = {
+  MEETING: '需绑定会议',
+  NOTE: '自由说明',
 }
 
 export type UserStatus = 'ACTIVE' | 'DISABLED'
@@ -72,6 +76,7 @@ export type NotifyType =
   | 'REJECTED'
   | 'REASSIGNED'
   | 'RESCHEDULED'
+  | 'MENTION'
   | 'DAILY_REPORT'
   | 'WEEKLY_REPORT'
 
@@ -82,6 +87,7 @@ export const NOTIFY_TYPE_LABELS: Record<NotifyType, string> = {
   REJECTED: '验收打回',
   REASSIGNED: '任务改派',
   RESCHEDULED: '截止改期',
+  MENTION: '被@',
   DAILY_REPORT: '督办日报',
   WEEKLY_REPORT: '督办周报',
 }

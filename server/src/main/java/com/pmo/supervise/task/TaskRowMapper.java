@@ -2,8 +2,8 @@ package com.pmo.supervise.task;
 
 import com.pmo.supervise.common.Priority;
 import com.pmo.supervise.common.Role;
-import com.pmo.supervise.common.SourceType;
 import com.pmo.supervise.common.TaskStatus;
+import com.pmo.supervise.source.SourcePalette;
 import com.pmo.supervise.task.dto.TaskDetailRow;
 import com.pmo.supervise.task.dto.TaskRow;
 import com.pmo.supervise.task.dto.TaskSource;
@@ -13,7 +13,12 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.LocalDateTime;
 
-/** 原生 SQL 行 → 读模型（TECHNICAL §4.4）。列名与 TaskQueryDao 的 SELECT 一一对应。 */
+/**
+ * 原生 SQL 行 → 读模型（TECHNICAL §4.4）。列名与 TaskQueryDao 的 SELECT 一一对应。
+ *
+ * <p>来源名称与主色来自 LEFT JOIN source_types；名称缺失兜底「未知来源（CODE）」、
+ * 颜色缺失回退石板灰——兜底放在映射层，页面才不会出现空白标签。
+ */
 public final class TaskRowMapper {
 
     private TaskRowMapper() {
@@ -84,10 +89,23 @@ public final class TaskRowMapper {
     }
 
     private static TaskSource source(ResultSet rs) throws SQLException {
-        SourceType type = SourceType.of(rs.getString("source_type"));
+        String code = rs.getString("source_type");
+        String name = null;
+        String colorHex = null;
+        try {
+            name = rs.getString("source_name");
+            colorHex = rs.getString("source_color");
+        } catch (SQLException ignored) {
+            // 计数/事件查询不 join 配置表，缺列按兜底处理
+        }
+        String label = name == null || name.isBlank() ? "未知来源（" + code + "）" : name;
+        SourcePalette.Triple triple = SourcePalette.of(colorHex);
         return new TaskSource(
-                type,
-                type.label(),
+                code,
+                label,
+                triple.color(),
+                triple.soft(),
+                triple.border(),
                 rs.getObject("source_meeting_id", Long.class),
                 rs.getString("meeting_title"),
                 rs.getObject("source_decision_item_id", Long.class),

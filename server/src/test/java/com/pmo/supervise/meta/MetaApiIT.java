@@ -3,7 +3,6 @@ package com.pmo.supervise.meta;
 import com.pmo.supervise.IntegrationTestSupport;
 import com.pmo.supervise.common.Priority;
 import com.pmo.supervise.common.Role;
-import com.pmo.supervise.common.SourceType;
 import com.pmo.supervise.common.TaskStatus;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -66,9 +65,12 @@ class MetaApiIT extends IntegrationTestSupport {
                 .andExpect(jsonPath("$.meetings[0].id").value(meeting))
                 .andExpect(jsonPath("$.meetings[0].title").value("Meta 会议"))
                 .andExpect(jsonPath("$.meetings[0].meetingDate").value("2026-11-01"))
-                .andExpect(jsonPath("$.sourceTypes", hasSize(SourceType.values().length)))
-                .andExpect(jsonPath("$.sourceTypes[0].value").value(SourceType.values()[0].name()))
-                .andExpect(jsonPath("$.sourceTypes[0].label").value(SourceType.values()[0].label()))
+                .andExpect(jsonPath("$.sourceTypes", hasSize(3)))
+                .andExpect(jsonPath("$.sourceTypes[0].value").value("MEETING"))
+                .andExpect(jsonPath("$.sourceTypes[0].label").value("会议决议"))
+                .andExpect(jsonPath("$.sourceTypes[0].color").value("#1B4D8F"))
+                .andExpect(jsonPath("$.sourceTypes[0].form").value("MEETING"))
+                .andExpect(jsonPath("$.sourceTypes[0].enabled").value(true))
                 .andExpect(jsonPath("$.statuses", hasSize(TaskStatus.values().length)))
                 .andExpect(jsonPath("$.statuses[0].value").value(TaskStatus.values()[0].name()))
                 .andExpect(jsonPath("$.priorities", hasSize(Priority.values().length)))

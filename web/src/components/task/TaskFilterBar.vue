@@ -8,8 +8,8 @@ import AppInput from '@/components/ui/AppInput.vue'
 import AppSelect from '@/components/ui/AppSelect.vue'
 import AppButton from '@/components/ui/AppButton.vue'
 import type { SourceType, TaskStatus } from '@/types/enums'
-import { SOURCE_TYPE_LABELS, TASK_STATUS_LABELS } from '@/types/enums'
-import type { UserOption } from '@/types/api'
+import { TASK_STATUS_LABELS } from '@/types/enums'
+import type { SourceTypeOption, UserOption } from '@/types/api'
 
 export interface PoolFilters {
   status: TaskStatus | ''
@@ -25,9 +25,11 @@ const props = withDefaults(
     modelValue: PoolFilters
     owners: UserOption[]
     meetings: Array<{ id: number; title: string }>
+    /** meta.sourceTypes 全量（含已停用）：停用来源仍要能筛历史任务（AC-5） */
+    sourceTypes?: SourceTypeOption[]
     loading?: boolean
   }>(),
-  { loading: false },
+  { sourceTypes: () => [], loading: false },
 )
 
 const emit = defineEmits<{ 'update:modelValue': [value: PoolFilters] }>()
@@ -40,13 +42,24 @@ const STATUS_OPTIONS = [
   })),
 ]
 
-const SOURCE_OPTIONS = [
-  { label: '全部来源', value: '' },
-  ...(Object.keys(SOURCE_TYPE_LABELS) as SourceType[]).map((type) => ({
-    label: SOURCE_TYPE_LABELS[type],
-    value: type,
-  })),
-]
+/**
+ * 来源筛选读 meta 全量（AC-5）：启用项按 sort 在前，停用项按 sort 在后并标注「（已停用）」——
+ * 停用来源仍要能筛出历史任务，不得因为停用把选项删掉。
+ */
+const sourceOptions = computed(() => {
+  const all = Array.isArray(props.sourceTypes) ? props.sourceTypes : []
+  const ordered = [...all].sort((a, b) => {
+    if (a.enabled !== b.enabled) return a.enabled ? -1 : 1
+    return a.sort - b.sort
+  })
+  return [
+    { label: '全部来源', value: '' },
+    ...ordered.map((item) => ({
+      label: item.enabled === false ? `${item.label}（已停用）` : item.label,
+      value: item.value,
+    })),
+  ]
+})
 
 const OVERDUE_OPTIONS = [
   { label: '是否逾期', value: '' },
@@ -100,7 +113,8 @@ const chips = computed<Chip[]>(() => {
     list.push({ key: 'ownerId', label: owner ? owner.name : `负责人 #${filter.ownerId}` })
   }
   if (filter.sourceType) {
-    list.push({ key: 'sourceType', label: SOURCE_TYPE_LABELS[filter.sourceType] })
+    const source = props.sourceTypes.find((item) => item.value === filter.sourceType)
+    list.push({ key: 'sourceType', label: source ? source.label : filter.sourceType })
   }
   if (filter.meetingId !== '') {
     const meeting = props.meetings.find((item) => item.id === filter.meetingId)
@@ -160,7 +174,7 @@ function clearAll(): void {
       />
       <AppSelect
         :model-value="modelValue.sourceType"
-        :options="SOURCE_OPTIONS"
+        :options="sourceOptions"
         size="compact"
         aria-label="来源类型筛选"
         @update:model-value="patch({ sourceType: $event as SourceType | '' })"

@@ -55,7 +55,7 @@ class NotificationServiceIT extends IntegrationTestSupport {
                 owner, NotifyType.DUE_SOON, taskId, "整理会议纪要",
                 "任务即将到期", "正文", "test:read:" + taskId, null, false)).orElseThrow().getId();
 
-        NotificationPage page = notificationService.page(owner, true, 1, 20);
+        NotificationPage page = notificationService.page(owner, true, null, 1, 20);
         assertThat(page.total()).isEqualTo(1);
         assertThat(page.unreadCount()).isEqualTo(1);
         assertThat(page.items().get(0).read()).isFalse();
@@ -66,8 +66,8 @@ class NotificationServiceIT extends IntegrationTestSupport {
 
         notificationService.markRead(notificationId, owner);
         assertThat(notificationService.unreadCount(owner)).isZero();
-        assertThat(notificationService.page(owner, true, 1, 20).total()).isZero();
-        assertThat(notificationService.page(owner, false, 1, 20).items().get(0).read()).isTrue();
+        assertThat(notificationService.page(owner, true, null, 1, 20).total()).isZero();
+        assertThat(notificationService.page(owner, false, null, 1, 20).items().get(0).read()).isTrue();
     }
 
     @Test
@@ -104,7 +104,7 @@ class NotificationServiceIT extends IntegrationTestSupport {
                 WHERE id = ?
                 """, notificationId);
 
-        NotificationPage page = notificationService.page(owner, false, 1, 20);
+        NotificationPage page = notificationService.page(owner, false, null, 1, 20);
 
         assertThat(page.items()).hasSize(1);
         assertThat(page.items().get(0).retryCount()).isEqualTo(2);

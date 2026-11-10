@@ -11,15 +11,15 @@ import { computed, nextTick, reactive, ref, watch } from 'vue'
 import Drawer from '@/components/ui/Drawer.vue'
 import AppButton from '@/components/ui/AppButton.vue'
 import AppInput from '@/components/ui/AppInput.vue'
-import AppSelect from '@/components/ui/AppSelect.vue'
+import AppSelect, { type SelectOption } from '@/components/ui/AppSelect.vue'
 import AppDatePicker from '@/components/ui/AppDatePicker.vue'
 import AppTextarea from '@/components/ui/AppTextarea.vue'
 import { taskApi } from '@/api/tasks'
 import { toApiError } from '@/api/http'
 import { useToast } from '@/composables/useToast'
-import { PRIORITY_LABELS, SOURCE_TYPE_LABELS } from '@/types/enums'
-import type { Priority, SourceType } from '@/types/enums'
-import type { DecisionItemRow, TaskDetail, UserOption } from '@/types/api'
+import { PRIORITY_LABELS, SOURCE_FORM_LABELS } from '@/types/enums'
+import type { Priority, SourceForm, SourceType } from '@/types/enums'
+import type { DecisionItemRow, SourceTypeOption, TaskDetail, UserOption } from '@/types/api'
 
 const props = withDefaults(
   defineProps<{
@@ -27,15 +27,16 @@ const props = withDefaults(
     task?: TaskDetail | null
     owners: UserOption[]
     meetings: Array<{ id: number; title: string }>
+    /** meta.sourceTypes 全量（AC-2 / AC-5）：来源选项与形态都来自配置，不写死三类 */
+    sourceTypes?: SourceTypeOption[]
   }>(),
-  { task: null },
+  { task: null, sourceTypes: () => [] },
 )
 
 const emit = defineEmits<{ close: []; saved: [detail: TaskDetail] }>()
 
 const toast = useToast()
 
-const SOURCE_TYPES: SourceType[] = ['MEETING', 'PROJECT', 'DAILY']
 const PRIORITIES: Priority[] = ['HIGH', 'MEDIUM', 'LOW']
 const TITLE_MAX = 100
 const NOTE_MAX = 200
@@ -59,9 +60,43 @@ const items = ref<DecisionItemRow[]>([])
 const itemsLoading = ref(false)
 /** 选中决议项时自动带出的标题，用户改过之后就不再覆盖 */
 const autoTitle = ref('')
+/** 本次会话里是否切换过形态：切换后给一行可见提示，保存前不再弹确认框 */
+const formSwitched = ref(false)
 
 const isEdit = computed(() => Boolean(props.task?.id))
 const drawerTitle = computed(() => (isEdit.value ? '编辑任务' : '新建任务'))
+
+/** 建任务只列启用来源，按 sort（AC-2）：停用项不得出现在新建下拉里；文案=名称，不露编码 */
+const sourceOptions = computed<SelectOption[]>(() =>
+  (Array.isArray(props.sourceTypes) ? props.sourceTypes : [])
+    .filter((item) => item.enabled !== false)
+    .slice()
+    .sort((a, b) => a.sort - b.sort)
+    .map((item) => ({ label: item.label, value: item.value })),
+)
+
+/** 编辑态只读展示当前来源：名称与停用标注都取配置，配置缺该编码时回落到任务行快照 */
+const currentSource = computed<SourceTypeOption | undefined>(() =>
+  (Array.isArray(props.sourceTypes) ? props.sourceTypes : []).find(
+    (item) => item.value === form.sourceType,
+  ),
+)
+const currentSourceLabel = computed(() => {
+  const name = currentSource.value?.label || props.task?.source?.typeLabel || form.sourceType
+  return currentSource.value && currentSource.value.enabled === false ? `${name}（已停用）` : name
+})
+
+/**
+ * 形态取配置里该编码的 form（AC-2）：MEETING 才显示会议/决议项，NOTE 显示说明。
+ * 配置未加载时按编码兜底，避免首帧把会议字段藏起来。
+ */
+function formOf(code: SourceType): SourceForm {
+  const picked = props.sourceTypes.find((item) => item.value === code)
+  if (picked) return picked.form
+  return code === 'MEETING' ? 'MEETING' : 'NOTE'
+}
+
+const activeForm = computed<SourceForm>(() => formOf(form.sourceType))
 
 const ownerOptions = computed(() =>
   (Array.isArray(props.owners) ? props.owners : []).map((owner) => ({
@@ -126,7 +161,7 @@ watch(
     if (meetingId === previous) return
     form.decisionItemId = ''
     items.value = []
-    if (form.sourceType !== 'MEETING' || meetingId === '') return
+    if (formOf(form.sourceType) !== 'MEETING' || meetingId === '') return
     itemsLoading.value = true
     try {
       items.value = await taskApi.decisionItems(Number(meetingId))
@@ -146,6 +181,7 @@ function resetForm(): void {
   summary.value = ''
   autoTitle.value = ''
   items.value = []
+  formSwitched.value = false
   if (!task) return
   form.title = task.title
   form.ownerId = task.owner?.id ?? ''
@@ -155,7 +191,7 @@ function resetForm(): void {
   form.decisionItemId = task.source?.decisionItemId ?? ''
   form.note = task.source?.note ?? ''
   form.priority = task.priority ?? 'MEDIUM'
-  if (form.sourceType === 'MEETING' && form.meetingId !== '') {
+  if (activeForm.value === 'MEETING' && form.meetingId !== '') {
     void loadItems(Number(form.meetingId))
   }
 }
@@ -186,16 +222,22 @@ function onDecisionItem(value: string): void {
   clearError('dueDate')
 }
 
-function setSourceType(type: SourceType): void {
-  if (isEdit.value || form.sourceType === type) return
-  form.sourceType = type
+function onSourceChange(value: string): void {
+  if (isEdit.value || !value || value === form.sourceType) return
+  const nextForm = formOf(value)
+  const changedForm = nextForm !== activeForm.value
+  form.sourceType = value
   clearError('meetingId')
   clearError('note')
-  if (type !== 'MEETING') {
+  // 切形态即清空另一组字段：避免带着旧形态的会议/说明提交，被服务端 422 打回（AC-2）
+  if (nextForm !== 'MEETING') {
     form.meetingId = ''
     form.decisionItemId = ''
     items.value = []
+  } else {
+    form.note = ''
   }
+  formSwitched.value = changedForm
 }
 
 function clearError(key: string): void {
@@ -229,17 +271,20 @@ function validate(): string[] {
     errors.dueDate = '请选择截止日期'
     order.push('dueDate')
   }
-  if (form.sourceType === 'MEETING') {
-    if (form.meetingId === '') {
-      errors.meetingId = '请选择来源会议'
-      order.push('meetingId')
+  // 编辑态来源只读（D6）：来源字段不参与校验，也不回写；只校验可改的标题与优先级
+  if (!isEdit.value) {
+    if (activeForm.value === 'MEETING') {
+      if (form.meetingId === '') {
+        errors.meetingId = '请选择来源会议'
+        order.push('meetingId')
+      }
+    } else if (!form.note.trim()) {
+      errors.note = '请填写来源说明，说明这条任务从哪来'
+      order.push('note')
+    } else if (form.note.trim().length > NOTE_MAX) {
+      errors.note = `来源说明不超过 ${NOTE_MAX} 字`
+      order.push('note')
     }
-  } else if (!form.note.trim()) {
-    errors.note = '请填写来源说明，说明这条任务从哪来'
-    order.push('note')
-  } else if (form.note.trim().length > NOTE_MAX) {
-    errors.note = `来源说明不超过 ${NOTE_MAX} 字`
-    order.push('note')
   }
   Object.keys(errors).forEach((key) => {
     if (!errors[key]) delete errors[key]
@@ -293,19 +338,19 @@ async function save(): Promise<void> {
       ? await taskApi.update(props.task.id, {
           title: form.title.trim(),
           priority: form.priority,
-          sourceNote: form.sourceType === 'MEETING' ? form.note.trim() || undefined : form.note.trim(),
+          // 来源不可改（D6）：编辑态不提交任何 source* 字段，服务端也不会接受
         })
       : await taskApi.create({
           title: form.title.trim(),
           ownerId: form.ownerId === '' ? null : Number(form.ownerId),
           dueDate: form.dueDate,
           sourceType: form.sourceType,
-          sourceMeetingId: form.sourceType === 'MEETING' ? Number(form.meetingId) : undefined,
+          sourceMeetingId: activeForm.value === 'MEETING' ? Number(form.meetingId) : undefined,
           sourceDecisionItemId:
-            form.sourceType === 'MEETING' && form.decisionItemId !== ''
+            activeForm.value === 'MEETING' && form.decisionItemId !== ''
               ? Number(form.decisionItemId)
               : undefined,
-          sourceNote: form.sourceType === 'MEETING' ? form.note.trim() || undefined : form.note.trim(),
+          sourceNote: activeForm.value === 'MEETING' ? form.note.trim() || undefined : form.note.trim(),
           priority: form.priority,
         })
     toast.success(isEdit.value ? '任务已更新' : '任务已创建')
@@ -361,23 +406,27 @@ async function save(): Promise<void> {
 
       <section class="task-form__group">
         <h3 class="task-form__legend">来源</h3>
-        <div class="segmented" role="radiogroup" aria-label="来源类型">
-          <button
-            v-for="type in SOURCE_TYPES"
-            :key="type"
-            type="button"
-            role="radio"
-            class="segmented__item"
-            :class="{ 'is-active': form.sourceType === type }"
-            :aria-checked="form.sourceType === type"
-            :disabled="isEdit"
-            @click="setSourceType(type)"
-          >
-            {{ SOURCE_TYPE_LABELS[type] }}
-          </button>
+        <div v-if="isEdit" class="source-readonly">
+          <span class="source-readonly__label">来源类型</span>
+          <span class="source-readonly__value">{{ currentSourceLabel }}</span>
         </div>
+        <AppSelect
+          v-else
+          :model-value="form.sourceType"
+          :options="sourceOptions"
+          label="来源类型"
+          required
+          :hint="`当前形态：${SOURCE_FORM_LABELS[activeForm]}`"
+          @update:model-value="onSourceChange"
+        />
+        <p v-if="isEdit" class="task-form__hint">
+          来源在创建时确定，不可修改；如需更换来源请新建任务
+        </p>
+        <p v-if="formSwitched && !isEdit" class="task-form__warn">
+          已切换形态，保存后按新形态校验
+        </p>
 
-        <template v-if="form.sourceType === 'MEETING'">
+        <template v-if="activeForm === 'MEETING'">
           <div :ref="(el) => setFieldEl('meetingId', el)">
             <AppSelect
               :model-value="form.meetingId"
@@ -512,6 +561,30 @@ async function save(): Promise<void> {
   display: inline-block;
   margin-right: var(--sp-2);
   color: var(--c-ink-400);
+}
+/* 编辑态来源只读（D6）：与禁用输入同高同圆角，肉眼可辨“此处不可改” */
+.source-readonly {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  height: 32px;
+  padding: 0 var(--sp-3);
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-md);
+  background: var(--c-line-soft);
+}
+.source-readonly__label {
+  flex: none;
+  font-size: var(--fs-body-sm);
+  color: var(--c-ink-500);
+}
+.source-readonly__value {
+  overflow: hidden;
+  color: var(--c-ink-900);
+  font-size: var(--fs-body-sm);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .task-form__warn {
   margin: 0;

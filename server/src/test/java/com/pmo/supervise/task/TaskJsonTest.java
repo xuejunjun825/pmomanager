@@ -5,7 +5,6 @@ import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.pmo.supervise.common.Priority;
 import com.pmo.supervise.common.Role;
-import com.pmo.supervise.common.SourceType;
 import com.pmo.supervise.common.TaskStatus;
 import com.pmo.supervise.task.dto.TaskDetailRow;
 import com.pmo.supervise.task.dto.TaskPermissions;
@@ -30,7 +29,8 @@ class TaskJsonTest {
     @Test
     void rowJsonKeepsFrontendFieldNames() throws Exception {
         TaskRow row = new TaskRow(1L, "任务", new UserRef(2L, "张三", Role.OWNER),
-                LocalDate.of(2026, 11, 10), new TaskSource(SourceType.PROJECT, "项目任务", null, null, null, "说明"),
+                LocalDate.of(2026, 11, 10),
+                new TaskSource("PROJECT", "项目任务", "#6941C6", "#F4F3FF", "#D9D6FE", null, null, null, "说明"),
                 TaskStatus.PENDING, "待开始", true, 3, true, 2L, null, null, null);
 
         String json = mapper.writeValueAsString(row);
@@ -44,11 +44,12 @@ class TaskJsonTest {
     @Test
     void detailJsonAddsEventsPermissionsAndIsOverdue() throws Exception {
         TaskDetailRow detail = new TaskDetailRow(1L, "任务", new UserRef(2L, "张三", Role.OWNER),
-                LocalDate.of(2026, 11, 10), new TaskSource(SourceType.MEETING, "会议决议", 9L, "周会", 11L, null),
+                LocalDate.of(2026, 11, 10),
+                new TaskSource("MEETING", "会议决议", "#1B4D8F", "#EAF1FA", "#C7D9EF", 9L, "周会", 11L, null),
                 TaskStatus.PENDING_ACCEPT, "待验收", false, 0, false, 1L, null, null, null,
                 new UserRef(3L, "派发人", Role.ADMIN), Priority.HIGH, "已完成", null, null,
                 List.of(), new TaskPermissions(true, true, false, false, false, false, false,
-                        false, false, false, Map.of()));
+                        false, false, false, true, false, Map.of()));
 
         String json = mapper.writeValueAsString(detail);
 

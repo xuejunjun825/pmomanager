@@ -10,6 +10,7 @@
 - 权限唯一判定点 `TaskAccessGuard`（8 个服务引用）；越权 403、owner 越界 404；Controller 不写业务分支。
 - 通知幂等：`dedup_key` 唯一键 INSERT-catch；扫描/报表一天一次由 `job_runs(job_key,run_date)` 主键保证。
 - 钉钉未配置：`DingTalkProperties` 判定，渠道状态 `NOT_CONFIGURED` 不重试；入口隐藏、推送跳过、业务零 500。
+- 来源类型唯一配置源（r2 起）：管理端维护、任务只存编码；内置 `MEETING/PROJECT/DAILY` 不可删，「会议决议」不可停用；任务进度 append-only 不改状态，@ 通知按（进度, 被 @ 人）幂等，被 @ 人获得该任务只读可见与续写进度权。
 - 错误体统一 `{code,message,fieldErrors,details,traceId}`，前端 `http.ts` 归一化；会话 7d，CSRF 使用明文 token 契约（`CsrfTokenRequestAttributeHandler`）。
 - 契约文档只写 `docs/teamflow/<yyyyMMdd-rN-slug>/`；跨需求记忆在本文件。
 
