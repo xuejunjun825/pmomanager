@@ -61,6 +61,13 @@ const PRIORITIES: Priority[] = ['HIGH', 'MEDIUM', 'LOW']
 const TITLE_MAX = 100
 const NOTE_MAX = 200
 
+/** 决议项必填的四条原因文案：只由 decisionReason() 产出，避免校验、行内错误、摘要三处漂移 */
+const DECISION_REQUIRED = '请选择关联决议项'
+const DECISION_LOADING = '决议项加载中，请稍候'
+const DECISION_LOAD_FAILED = '决议项加载失败，请点击下方「重试加载决议项」'
+const DECISION_NONE_AVAILABLE =
+  '该会议暂无可关联的决议项（均已成任务），请改选会议或改用其他来源'
+
 interface FormState {
   title: string
   ownerId: number | ''
@@ -80,6 +87,11 @@ const summary = ref('')
 const saving = ref(false)
 const items = ref<DecisionItemRow[]>([])
 const itemsLoading = ref(false)
+/** 决议项是否已成功加载过（区分「还没请求」与「请求回来是空/全已转任务」） */
+const itemsLoaded = ref(false)
+const itemsError = ref('')
+/** 决议项请求序号：快速切会议时丢弃过期响应，避免 A 的列表顶掉 B 的选项 */
+let itemsRequestSeq = 0
 /** 选中决议项时自动带出的标题，用户改过之后就不再覆盖 */
 const autoTitle = ref('')
 /** 本次会话里是否切换过形态：切换后给一行可见提示，保存前不再弹确认框 */
@@ -159,6 +171,43 @@ const itemOptions = computed(() =>
   })),
 )
 
+/** 会议下没有任何可绑决议项（空 / 全部已成任务）：控件禁用并把原因说清楚，而不是静默放过 */
+const noSelectableItems = computed(
+  () =>
+    itemsLoaded.value &&
+    !itemsLoading.value &&
+    !itemsError.value &&
+    items.value.every((item) => item.converted),
+)
+
+/** 编辑态只读：会议名取下拉清单，配置缺该会议时回落到任务行快照，再兜底编号 */
+const currentMeetingLabel = computed(() => {
+  const id = props.task?.source?.meetingId
+  if (id == null) return ''
+  return props.meetings.find((meeting) => meeting.id === id)?.title || props.task?.source?.meetingTitle || `会议 #${id}`
+})
+
+/** 编辑态只读：决议项描述取已加载清单，列表为空/失败时兜底编号，永不空白（AC-5） */
+const currentDecisionLabel = computed(() => {
+  const id = props.task?.source?.decisionItemId
+  if (id == null) return ''
+  const found = items.value.find((item) => item.id === id)
+  if (found) return found.converted ? `${found.description}（已转任务）` : found.description
+  return itemsLoading.value ? '加载中…' : `决议项 #${id}`
+})
+
+/** 占位文案随状态变化，任何一态都不暗示决议项可以跳过（AC-7） */
+const decisionPlaceholder = computed(() => {
+  if (form.meetingId === '') return '请先选择来源会议'
+  if (itemsLoading.value) return '决议项加载中…'
+  if (itemsError.value) return '决议项加载失败'
+  if (noSelectableItems.value) return '暂无可关联的决议项'
+  return '选择决议项'
+})
+
+/** 行内错误：服务端 422 文案优先，其余由 decisionReason() 单点产出（AC-4 / AC-6） */
+const decisionItemError = computed(() => errors.decisionItemId || decisionReason())
+
 const priorityOptions = PRIORITIES.map((priority) => ({
   label: PRIORITY_LABELS[priority],
   value: priority,
@@ -197,20 +246,22 @@ watch(
 
 watch(
   () => form.meetingId,
-  async (meetingId, previous) => {
+  (meetingId, previous) => {
+    // 编辑态来源只读：resetForm 的回填会触发本 watcher，必须早退，
+    // 否则异步清空刚回显的 decisionItemId，并重复请求决议项（AC-5）
+    if (isEdit.value) return
     if (meetingId === previous) return
     form.decisionItemId = ''
+    clearError('decisionItemId')
     items.value = []
-    if (formOf(form.sourceType) !== 'MEETING' || meetingId === '') return
-    itemsLoading.value = true
-    try {
-      items.value = await taskApi.decisionItems(Number(meetingId))
-    } catch (error) {
-      const apiError = toApiError(error)
-      toast.warning(apiError.message || '决议项加载失败，可以先只选择会议')
-    } finally {
+    itemsLoaded.value = false
+    itemsError.value = ''
+    if (formOf(form.sourceType) !== 'MEETING' || meetingId === '') {
+      itemsRequestSeq++
       itemsLoading.value = false
+      return
     }
+    void loadItems(Number(meetingId))
   },
 )
 
@@ -221,6 +272,10 @@ function resetForm(): void {
   summary.value = ''
   autoTitle.value = ''
   items.value = []
+  itemsLoaded.value = false
+  itemsError.value = ''
+  // 作废上一次打开时还在途的请求，避免它的响应落到这一次的回显上
+  itemsRequestSeq++
   formSwitched.value = false
   if (!task) return
   form.title = task.title
@@ -232,24 +287,62 @@ function resetForm(): void {
   form.projectId = task.source?.projectId ?? ''
   form.note = task.source?.note ?? ''
   form.priority = task.priority ?? 'MEDIUM'
+  // 编辑态只读行需要决议项描述：与新建共用同一个加载入口（不再写第二个 fetch）
   if (activeForm.value === 'MEETING' && form.meetingId !== '') {
     void loadItems(Number(form.meetingId))
   }
 }
 
+/** 决议项唯一加载入口：请求序号保证快速切会议时只有最后一次响应生效 */
 async function loadItems(meetingId: number): Promise<void> {
+  const requestId = ++itemsRequestSeq
   itemsLoading.value = true
+  itemsError.value = ''
+  itemsLoaded.value = false
   try {
-    items.value = await taskApi.decisionItems(meetingId)
+    const rows = await taskApi.decisionItems(meetingId)
+    if (requestId !== itemsRequestSeq) return
+    items.value = rows
+    itemsLoaded.value = true
   } catch {
+    if (requestId !== itemsRequestSeq) return
     items.value = []
+    itemsError.value = DECISION_LOAD_FAILED
   } finally {
-    itemsLoading.value = false
+    if (requestId === itemsRequestSeq) {
+      itemsLoading.value = false
+      // 加载结束就撤掉「加载中」这条陈旧提示，让行内回落到当前状态
+      clearStaleLoadingError()
+    }
   }
+}
+
+function clearStaleLoadingError(): void {
+  if (errors.decisionItemId !== DECISION_LOADING) return
+  delete errors.decisionItemId
+  if (!Object.keys(errors).length) summary.value = ''
+}
+
+/** 加载失败后的唯一重试入口（AC-6 ②）：重试期间行内先显示「加载中」 */
+function retryItems(): void {
+  if (form.meetingId === '') return
+  clearError('decisionItemId')
+  void loadItems(Number(form.meetingId))
+}
+
+/** 未选决议项的原因文案：唯一的产出点，validate()、行内 :error、摘要共用同一判断 */
+function decisionReason(): string {
+  if (isEdit.value || form.meetingId === '') return ''
+  if (form.decisionItemId !== '') return ''
+  if (itemsLoading.value) return DECISION_LOADING
+  if (itemsError.value) return DECISION_LOAD_FAILED
+  if (noSelectableItems.value) return DECISION_NONE_AVAILABLE
+  return DECISION_REQUIRED
 }
 
 function onDecisionItem(value: string): void {
   form.decisionItemId = value ? Number(value) : ''
+  clearError('decisionItemId')
   const picked = items.value.find((item) => item.id === form.decisionItemId)
   if (!picked) return
   if (!form.title.trim() || form.title === autoTitle.value) {
@@ -269,8 +362,11 @@ function onSourceChange(value: string): void {
   const changedForm = nextForm !== activeForm.value
   form.sourceType = value
   clearError('meetingId')
+  clearError('decisionItemId')
   clearError('note')
   clearError('projectId')
+  itemsLoaded.value = false
+  itemsError.value = ''
   // 切形态即清空另外两组字段：三态互斥由服务端单点判定，前端不能带着旧字段提交（AC-2）
   if (nextForm !== 'MEETING') {
     form.meetingId = ''
@@ -319,6 +415,13 @@ function validate(): string[] {
       if (form.meetingId === '') {
         errors.meetingId = '请选择来源会议'
         order.push('meetingId')
+      } else {
+        // 会议与决议项共用一个 order 位：摘要计数「还有 1 项需要填写」与行内文案一致
+        const reason = decisionReason()
+        if (reason) {
+          errors.decisionItemId = reason
+          order.push('decisionItemId')
+        }
       }
     } else if (activeForm.value === 'PROJECT') {
       // 项目型来源必须绑项目（AC-3）：三态互斥后会议/说明都不再是替代品
@@ -348,8 +451,13 @@ async function focusFirst(order: string[]): Promise<void> {
   if (!el) return
   // jsdom / 老内核可能没有 scrollIntoView：滚动只是体验，缺了不能让错误提示丢失
   el.scrollIntoView?.({ block: 'center', behavior: 'smooth' })
-  const target = el.querySelector<HTMLElement>('input, select, textarea')
-  target?.focus()
+  // 优先落到可交互控件（决议项 select 禁用时退到重试按钮），再退到 tabindex="-1" 容器，
+  // 保证焦点一定停在这个字段上，不会跳回页面顶部
+  const target =
+    el.querySelector<HTMLElement>(
+      'input:not([disabled]), select:not([disabled]), textarea:not([disabled]), button:not([disabled])',
+    ) ?? el
+  target.focus()
 }
 
 const SERVER_FIELD_MAP: Record<string, string> = {
@@ -441,7 +549,7 @@ async function save(): Promise<void> {
   <Drawer
     :open="open"
     :title="drawerTitle"
-    :description="isEdit ? '来源不可修改；改负责人或截止日期请用「改派 / 改期」' : '四个必填项齐全才会保存'"
+    :description="isEdit ? '来源不可修改；改负责人或截止日期请用「改派 / 改期」' : '必填项齐全才会保存'"
     :width="560"
     @close="emit('close')"
   >
@@ -497,28 +605,51 @@ async function save(): Promise<void> {
         </p>
 
         <template v-if="activeForm === 'MEETING'">
-          <div :ref="(el) => setFieldEl('meetingId', el)">
-            <AppSelect
-              :model-value="form.meetingId"
-              :options="meetingOptions"
-              label="来源会议"
-              required
-              :disabled="isEdit"
-              placeholder="选择会议"
-              :invalid="Boolean(errors.meetingId)"
-              :error="errors.meetingId"
-              @update:model-value="form.meetingId = $event ? Number($event) : ''; clearError('meetingId')"
-            />
-          </div>
-          <AppSelect
-            :model-value="form.decisionItemId"
-            :options="itemOptions"
-            label="关联决议项"
-            :disabled="isEdit || form.meetingId === '' || itemsLoading"
-            :placeholder="itemsLoading ? '决议项加载中…' : '可不选，只关联会议'"
-            hint="已转为任务的决议项不可重复选择"
-            @update:model-value="onDecisionItem"
-          />
+          <template v-if="isEdit">
+            <div class="source-readonly">
+              <span class="source-readonly__label">来源会议</span>
+              <span class="source-readonly__value">{{ currentMeetingLabel }}</span>
+            </div>
+            <div class="source-readonly">
+              <span class="source-readonly__label">关联决议项</span>
+              <span class="source-readonly__value">{{ currentDecisionLabel }}</span>
+            </div>
+          </template>
+          <template v-else>
+            <div :ref="(el) => setFieldEl('meetingId', el)">
+              <AppSelect
+                :model-value="form.meetingId"
+                :options="meetingOptions"
+                label="来源会议"
+                required
+                placeholder="选择会议"
+                :invalid="Boolean(errors.meetingId)"
+                :error="errors.meetingId"
+                @update:model-value="form.meetingId = $event ? Number($event) : ''; clearError('meetingId')"
+              />
+            </div>
+            <div
+              :ref="(el) => setFieldEl('decisionItemId', el)"
+              class="task-form__decision"
+              tabindex="-1"
+            >
+              <AppSelect
+                :model-value="form.decisionItemId"
+                :options="itemOptions"
+                label="关联决议项"
+                required
+                :disabled="form.meetingId === '' || itemsLoading || noSelectableItems"
+                :placeholder="decisionPlaceholder"
+                hint="已转为任务的决议项不可重复选择"
+                :invalid="Boolean(decisionItemError)"
+                :error="decisionItemError"
+                @update:model-value="onDecisionItem"
+              />
+              <button v-if="itemsError" type="button" class="task-form__retry" @click="retryItems">
+                重试加载决议项
+              </button>
+            </div>
+          </template>
         </template>
         <template v-else-if="activeForm === 'PROJECT'">
           <!-- 编辑态不提供改项目入口（DESIGN §3.4）：项目只在上方只读行回显 -->
@@ -653,6 +784,39 @@ async function save(): Promise<void> {
   display: inline-block;
   margin-right: var(--sp-2);
   color: var(--c-ink-400);
+}
+/* 决议项字段容器：select 与「重试」按钮垂直成组；tabindex=-1 让焦点在两者都不可聚焦时仍落在这里 */
+.task-form__decision {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.task-form__decision:focus-visible {
+  outline: 2px solid var(--c-primary);
+  outline-offset: 2px;
+  border-radius: var(--r-md);
+}
+/* 加载失败的重试：文字按钮，与行内错误同组，不抢保存按钮的视觉权重 */
+.task-form__retry {
+  align-self: flex-start;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--c-primary);
+  font-size: var(--fs-caption);
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.task-form__retry:hover {
+  color: var(--c-primary-strong, var(--c-primary));
+}
+.task-form__retry:focus-visible {
+  outline: 2px solid var(--c-primary);
+  outline-offset: 2px;
+  border-radius: var(--r-sm);
 }
 /* 编辑态来源只读（D6）：与禁用输入同高同圆角，肉眼可辨“此处不可改” */
 .source-readonly {

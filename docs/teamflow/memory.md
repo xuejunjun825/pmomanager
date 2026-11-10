@@ -22,3 +22,4 @@
 - 真浏览器视觉与可访问性（M1/M5/M6）、真时钟 09:00 / 周一 09:00 触发（M4）待人工复核。
 - AC-1「钉钉侧退出后系统会话同步失效」：TECHNICAL 称前端 `pagehide` 尽力登出，但 `web/src` 未实现该监听，需补监听或修正文档表述（P3，不阻断）。
 - r3 返工（r2 R-1 来源选项收口 + 详情来源标签去重）已于 2026-11-10 验收通过（`docs/teamflow/20261110-r3-source-options-extract/ACCEPTANCE.md`）；待办候选：`ownerOptions`/`meetingOptions` 下拉占位仍在 `TaskFilterBar` 与 `DashboardPage` 两处同形复制，下一轮抽 util。
+- r6 后待办：任务详情来源只渲染会议标题，不显示决议项描述（AC-9 该子句与 PRD §3 非目标冲突，决议项绑定已落库）；如需展示另立需求。
