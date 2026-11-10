@@ -11,7 +11,7 @@ import { computed, nextTick, reactive, ref, watch } from 'vue'
 import Drawer from '@/components/ui/Drawer.vue'
 import AppButton from '@/components/ui/AppButton.vue'
 import AppInput from '@/components/ui/AppInput.vue'
-import AppSelect, { type SelectOption } from '@/components/ui/AppSelect.vue'
+import AppSelect from '@/components/ui/AppSelect.vue'
 import AppDatePicker from '@/components/ui/AppDatePicker.vue'
 import AppTextarea from '@/components/ui/AppTextarea.vue'
 import { taskApi } from '@/api/tasks'
@@ -20,6 +20,7 @@ import { useToast } from '@/composables/useToast'
 import { PRIORITY_LABELS, SOURCE_FORM_LABELS } from '@/types/enums'
 import type { Priority, SourceForm, SourceType } from '@/types/enums'
 import type { DecisionItemRow, SourceTypeOption, TaskDetail, UserOption } from '@/types/api'
+import { sourceOptions as buildSourceOptions, type SourceOption } from '@/utils/sourceOptions'
 
 const props = withDefaults(
   defineProps<{
@@ -67,12 +68,8 @@ const isEdit = computed(() => Boolean(props.task?.id))
 const drawerTitle = computed(() => (isEdit.value ? '编辑任务' : '新建任务'))
 
 /** 建任务只列启用来源，按 sort（AC-2）：停用项不得出现在新建下拉里；文案=名称，不露编码 */
-const sourceOptions = computed<SelectOption[]>(() =>
-  (Array.isArray(props.sourceTypes) ? props.sourceTypes : [])
-    .filter((item) => item.enabled !== false)
-    .slice()
-    .sort((a, b) => a.sort - b.sort)
-    .map((item) => ({ label: item.label, value: item.value })),
+const sourceOptions = computed<SourceOption[]>(() =>
+  buildSourceOptions(props.sourceTypes, { allOption: false, includeDisabled: false }),
 )
 
 /** 编辑态只读展示当前来源：名称与停用标注都取配置，配置缺该编码时回落到任务行快照 */

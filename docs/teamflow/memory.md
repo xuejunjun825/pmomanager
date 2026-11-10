@@ -10,7 +10,7 @@
 - 权限唯一判定点 `TaskAccessGuard`（8 个服务引用）；越权 403、owner 越界 404；Controller 不写业务分支。
 - 通知幂等：`dedup_key` 唯一键 INSERT-catch；扫描/报表一天一次由 `job_runs(job_key,run_date)` 主键保证。
 - 钉钉未配置：`DingTalkProperties` 判定，渠道状态 `NOT_CONFIGURED` 不重试；入口隐藏、推送跳过、业务零 500。
-- 来源类型唯一配置源（r2 起）：管理端维护、任务只存编码；内置 `MEETING/PROJECT/DAILY` 不可删，「会议决议」不可停用；任务进度 append-only 不改状态，@ 通知按（进度, 被 @ 人）幂等，被 @ 人获得该任务只读可见与续写进度权。
+- 来源类型唯一配置源（r2 起）：管理端维护、任务只存编码；内置 `MEETING/PROJECT/DAILY` 不可删，「会议决议」不可停用；任务进度 append-only 不改状态，@ 通知按（进度, 被 @ 人）幂等，被 @ 人获得该任务只读可见与续写进度权。前端来源选项投影唯一实现 `web/src/utils/sourceOptions.ts:sourceOptions()`（r3 起：占位/启用优先/停用标注集中，抽屉传 `allOption:false, includeDisabled:false`），页面不得自拼；任务详情来源只由 `SourceTag` 渲染一次。
 - 错误体统一 `{code,message,fieldErrors,details,traceId}`，前端 `http.ts` 归一化；会话 7d，CSRF 使用明文 token 契约（`CsrfTokenRequestAttributeHandler`）。
 - 契约文档只写 `docs/teamflow/<yyyyMMdd-rN-slug>/`；跨需求记忆在本文件。
 
@@ -18,4 +18,4 @@
 - 真实钉钉扫码/工作通知送达需凭证补测（QA-REPORT §5 M2/M3）。
 - 真浏览器视觉与可访问性（M1/M5/M6）、真时钟 09:00 / 周一 09:00 触发（M4）待人工复核。
 - AC-1「钉钉侧退出后系统会话同步失效」：TECHNICAL 称前端 `pagehide` 尽力登出，但 `web/src` 未实现该监听，需补监听或修正文档表述（P3，不阻断）。
-- r2 验收遗留 R-1（有条件通过项）：前端来源选项投影（启用优先/停用标注）在任务池筛选、矩阵、看板三处重复，应抽公共 helper 并补单测后复验。
+- r3 返工（r2 R-1 来源选项收口 + 详情来源标签去重）已于 2026-11-10 验收通过（`docs/teamflow/20261110-r3-source-options-extract/ACCEPTANCE.md`）；待办候选：`ownerOptions`/`meetingOptions` 下拉占位仍在 `TaskFilterBar` 与 `DashboardPage` 两处同形复制，下一轮抽 util。

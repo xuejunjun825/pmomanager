@@ -20,7 +20,7 @@ import { useToast } from '@/composables/useToast'
 import { formatNumber, formatPercent } from '@/utils/format'
 import type { MatrixRange, SourceType } from '@/types/enums'
 import type { MatrixRow, MatrixView, SourceTypeOption } from '@/types/api'
-import type { SelectOption } from '@/components/ui/AppSelect.vue'
+import { sourceOptions as buildSourceOptions, type SourceOption } from '@/utils/sourceOptions'
 
 interface MatrixQueryState {
   source: SourceType | ''
@@ -46,19 +46,7 @@ const RANGES: { value: MatrixRange; label: string }[] = [
  * 启用项按 sort 在前，停用项在后并标注「（已停用）」，历史任务的来源仍可筛。
  */
 const sourceTypes = ref<SourceTypeOption[]>([])
-const sourceOptions = computed<SelectOption[]>(() => {
-  const ordered = [...sourceTypes.value].sort((a, b) => {
-    if (a.enabled !== b.enabled) return a.enabled ? -1 : 1
-    return a.sort - b.sort
-  })
-  return [
-    { label: '全部来源', value: '' },
-    ...ordered.map((item) => ({
-      label: item.enabled === false ? `${item.label}（已停用）` : item.label,
-      value: item.value,
-    })),
-  ]
-})
+const sourceOptions = computed<SourceOption[]>(() => buildSourceOptions(sourceTypes.value))
 
 const view = ref<MatrixView | null>(null)
 const loading = ref(false)

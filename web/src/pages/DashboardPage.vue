@@ -31,6 +31,7 @@ import type { SourceType } from '@/types/enums'
 import type { DashboardView, SourceTypeOption, TaskRow, UrgeResult, UserOption } from '@/types/api'
 import type { TableColumn } from '@/components/ui/DataTable.vue'
 import type { SelectOption } from '@/components/ui/AppSelect.vue'
+import { sourceOptions as buildSourceOptions, type SourceOption } from '@/utils/sourceOptions'
 
 const toast = useToast()
 
@@ -65,19 +66,7 @@ const meetingOptions = computed<SelectOption[]>(() => [
   ...meetings.value.map((meeting) => ({ label: meeting.title, value: String(meeting.id) })),
 ])
 /** 与任务池/矩阵同口径（AC-5）：启用项按 sort 在前，停用项按 sort 在后并标注（D-02） */
-const sourceOptions = computed<SelectOption[]>(() => {
-  const ordered = [...sourceTypes.value].sort((a, b) => {
-    if (a.enabled !== b.enabled) return a.enabled ? -1 : 1
-    return a.sort - b.sort
-  })
-  return [
-    { label: '全部来源', value: '' },
-    ...ordered.map((item) => ({
-      label: item.enabled === false ? `${item.label}（已停用）` : item.label,
-      value: item.value,
-    })),
-  ]
-})
+const sourceOptions = computed<SourceOption[]>(() => buildSourceOptions(sourceTypes.value))
 
 const kpis = computed(() => view.value?.kpis ?? null)
 const focusRows = computed<TaskRow[]>(() => view.value?.focus ?? [])

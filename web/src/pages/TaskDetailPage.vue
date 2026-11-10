@@ -129,13 +129,6 @@ const stepIndex = computed(() => {
 
 const cancelled = computed(() => detail.value?.status === 'CANCELLED')
 
-/** 名称来自服务端 join 的 source_types（AC-5），本地不再有第二套标签表 */
-const sourceLabel = computed(() => {
-  const source = detail.value?.source
-  if (!source) return '—'
-  return source.typeLabel ?? source.type
-})
-
 const urgeSummary = computed(() => {
   const task = detail.value
   if (!task) return '还没有催办'
@@ -323,6 +316,7 @@ onMounted(() => {
             <h2 class="panel__title">来源</h2>
             <div class="source">
               <div class="source__head">
+                <!-- 来源名只由 SourceTag 渲染一次（缺名称时它自己兜底「未知来源（CODE）」）；v-else 仅补空源占位 -->
                 <SourceTag
                   v-if="detail.source"
                   :code="detail.source.type"
@@ -332,7 +326,7 @@ onMounted(() => {
                   :border-color="detail.source.borderColor"
                   :meeting-title="detail.source.meetingTitle"
                 />
-                <span class="source__type">{{ sourceLabel }}</span>
+                <span v-else class="source__type">—</span>
               </div>
               <!-- 形态以「是否绑定会议」为准，不按来源编码判断：自定义会议型来源同样渲染（D-01 / AC-5） -->
               <template v-if="detail.source?.meetingId != null">

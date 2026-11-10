@@ -1,0 +1,7 @@
+{
+  "reqId": "req-3",
+  "runId": "tf-mwa04ns7-0r60ao",
+  "title": "把验收报告里标为有条件通过的 R-1 和一个小视觉缺陷一起修掉： 1）R-1：来源选项的组装逻辑在前端重复了 4 处，抽成一个公共的 sourceOptions",
+  "mode": "tech",
+  "createdAt": 1794273524082
+}

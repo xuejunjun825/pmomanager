@@ -10,6 +10,7 @@ import AppButton from '@/components/ui/AppButton.vue'
 import type { SourceType, TaskStatus } from '@/types/enums'
 import { TASK_STATUS_LABELS } from '@/types/enums'
 import type { SourceTypeOption, UserOption } from '@/types/api'
+import { sourceOptions as buildSourceOptions } from '@/utils/sourceOptions'
 
 export interface PoolFilters {
   status: TaskStatus | ''
@@ -46,20 +47,7 @@ const STATUS_OPTIONS = [
  * 来源筛选读 meta 全量（AC-5）：启用项按 sort 在前，停用项按 sort 在后并标注「（已停用）」——
  * 停用来源仍要能筛出历史任务，不得因为停用把选项删掉。
  */
-const sourceOptions = computed(() => {
-  const all = Array.isArray(props.sourceTypes) ? props.sourceTypes : []
-  const ordered = [...all].sort((a, b) => {
-    if (a.enabled !== b.enabled) return a.enabled ? -1 : 1
-    return a.sort - b.sort
-  })
-  return [
-    { label: '全部来源', value: '' },
-    ...ordered.map((item) => ({
-      label: item.enabled === false ? `${item.label}（已停用）` : item.label,
-      value: item.value,
-    })),
-  ]
-})
+const sourceOptions = computed(() => buildSourceOptions(props.sourceTypes))
 
 const OVERDUE_OPTIONS = [
   { label: '是否逾期', value: '' },
