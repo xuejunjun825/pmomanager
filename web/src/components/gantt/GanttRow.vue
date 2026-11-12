@@ -1,13 +1,13 @@
 <script setup lang="ts">
 /**
- * 甘特三态行（DESIGN §4.1）：主题 44 / 项目 32 / 任务 40，左列 280 单行省略。
+ * 甘特三态行（DESIGN §4.1）：主题 44 / 项目 32 / 任务 40，左列宽度取 LEFT_COLUMN（与表头同源）。
  * 折叠由 GanttChart 决定是否渲染子行，本组件只负责 `aria-expanded` 与图标旋转；
  * 任务条的起点/宽度来自 useGanttWindow，逾期与风险只读接口字段。
  */
 import { computed } from 'vue'
 import type { GanttProjectGroup, GanttTask, GanttThemeGroup } from '@/types/api'
 import type { GanttWindow } from '@/composables/useGanttWindow'
-import { barGeometry } from '@/composables/useGanttWindow'
+import { LEFT_COLUMN, barGeometry, windowDays } from '@/composables/useGanttWindow'
 import StatusBadge from '@/components/ui/StatusBadge.vue'
 import GanttBar from '@/components/gantt/GanttBar.vue'
 
@@ -34,11 +34,15 @@ const railStyle = computed(() =>
     : { paddingLeft: `${indent.value}px` },
 )
 const geometry = computed(() => barGeometry(task.value, props.window, props.dayW))
+/** 行网格与表头 `.gantt__head` 同一来源：LEFT_COLUMN 调整时两处一起动，避免行与表头错位 */
+const rowStyle = computed(() => ({ gridTemplateColumns: `${LEFT_COLUMN}px 1fr` }))
+/** 时间轴总宽，与 GanttChart 的 totalWidth 同一算式：条与 tooltip 都以它为界 */
+const laneWidth = computed(() => windowDays(props.window) * props.dayW)
 const ownerName = computed(() => task.value.owner?.name ?? '未指派')
 </script>
 
 <template>
-  <div class="row" :class="[`row--${kind}`, { 'row--collapsed': collapsed }]">
+  <div class="row" :class="[`row--${kind}`, { 'row--collapsed': collapsed }]" :style="rowStyle">
     <div class="row__rail" :style="railStyle">
       <button
         v-if="kind !== 'task'"
@@ -93,6 +97,7 @@ const ownerName = computed(() => task.value.owner?.name ?? '未指派')
         :width="geometry.width"
         :pinned-start="task.pinnedStart"
         :pinned-end="task.pinnedEnd"
+        :lane-width="laneWidth"
         @open="emit('open', $event)"
       />
     </div>
@@ -102,7 +107,7 @@ const ownerName = computed(() => task.value.owner?.name ?? '未指派')
 <style scoped>
 .row {
   display: grid;
-  grid-template-columns: 280px 1fr;
+  /* 列宽由 rowStyle 从 LEFT_COLUMN 注入，与 .gantt__head 同源，禁止再写字面量 280 */
   position: relative;
 }
 .row--theme {

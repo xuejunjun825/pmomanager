@@ -328,7 +328,7 @@ describe('TaskDetailPage 进度与深链', () => {
     const anchor = wrapper.find('#progress-12')
     expect(anchor.exists()).toBe(true)
     expect(anchor.classes()).toContain('is-anchor')
-    expect(wrapper.text()).toContain('进度与流转')
+    expect(wrapper.text()).toContain('流转记录')
     expect(wrapper.find('.panel__count').text()).toContain('2/200')
   })
 

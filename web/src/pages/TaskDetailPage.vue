@@ -309,7 +309,7 @@ onMounted(() => {
         <div class="main">
           <!-- ① 状态步进：五步闭环条（DESIGN §3.6），只描述下一步，不渲染按钮 -->
           <section class="panel">
-            <h2 class="panel__title">进度</h2>
+            <h2 class="panel__title">进度概览</h2>
             <TaskStatusFlow
               :status="detail.status"
               :owner-name="detail.owner?.name"
@@ -411,7 +411,7 @@ onMounted(() => {
           <!-- ④ 进度与流转（合并时间线） -->
           <section class="panel">
             <div class="panel__head">
-              <h2 class="panel__title">进度与流转</h2>
+              <h2 class="panel__title">流转记录</h2>
               <span class="panel__count num" :class="{ 'is-limit': progressTotal >= 200 }">
                 进度 {{ progressTotal }}/200
               </span>

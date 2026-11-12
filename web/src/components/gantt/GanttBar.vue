@@ -14,11 +14,17 @@ const props = defineProps<{
   width: number
   pinnedStart: boolean
   pinnedEnd: boolean
+  /** 时间轴总宽（窗口天数 × dayW）：贴右缘的条把 tooltip 镜像到左侧，避免溢出滚动容器 */
+  laneWidth: number
 }>()
 
 defineEmits<{ (event: 'open', id: number): void }>()
 
 const range = computed(() => `${shortDate(props.task.startDate)} → ${shortDate(props.task.dueDate)}`)
+
+/** tooltip 静止态 display:none（隐藏元素仍参与溢出计算，日档会撑出横向滚动，AC-3）。
+ *  悬停时才出现，右侧放不下（280 宽 + 8 间距 + 余量）就镜像到条的左边。 */
+const tipMirror = computed(() => props.laneWidth > 0 && props.x + 300 > props.laneWidth)
 const showOverdue = computed(() => props.task.isOverdue && props.width >= 64)
 const overdueText = computed(() => `逾期 ${props.task.overdueDays} 天`)
 const overdueLabel = computed(() =>
@@ -64,7 +70,7 @@ const aria = computed(() => {
       :title="`风险 · 截止 ${shortDate(task.dueDate)}（窗口外）`"
       aria-hidden="true"
     />
-    <span class="tip" role="tooltip">
+    <span class="tip" :class="{ 'tip--mirror': tipMirror }" role="tooltip">
       <span class="tip__title">{{ task.title }}</span>
       <span class="tip__row">{{ task.owner?.name ?? '未指派' }}</span>
       <span class="tip__row">{{ task.sourceLabel || '无来源' }}</span>
@@ -180,7 +186,7 @@ const aria = computed(() => {
   top: calc(100% + 8px);
   left: 0;
   z-index: var(--z-dropdown);
-  display: flex;
+  display: none;
   flex-direction: column;
   gap: 2px;
   width: max-content;
@@ -194,8 +200,11 @@ const aria = computed(() => {
   box-shadow: var(--sh-3);
   opacity: 0;
   visibility: hidden;
-  transition: opacity var(--t-hover) var(--ease);
   pointer-events: none;
+}
+.tip--mirror {
+  left: auto;
+  right: 0;
 }
 .tip__title {
   font-weight: 600;
@@ -205,7 +214,25 @@ const aria = computed(() => {
 }
 .bar:hover .tip,
 .bar:focus-visible .tip {
+  display: flex;
   opacity: 1;
   visibility: visible;
+  animation: tip-in var(--t-hover) var(--ease);
+}
+@keyframes tip-in {
+  from {
+    opacity: 0;
+    transform: translateY(-2px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bar:hover .tip,
+  .bar:focus-visible .tip {
+    animation: none;
+  }
 }
 </style>

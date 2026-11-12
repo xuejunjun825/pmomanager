@@ -35,8 +35,13 @@ export interface GanttMonthBand {
 }
 
 const ZOOM_DAYS: Record<GanttZoom, number> = { day: 14, week: 84, month: 182 }
-const MIN_DAY_WIDTH = 40
-const MAX_DAY_WIDTH = 96
+/** 左侧 sticky 列宽：页面与图表共用这一处常量，禁止再写字面量 280 */
+export const LEFT_COLUMN = 280
+/** 日宽上限：只有超宽屏才会触发（timelineW > 84×96） */
+export const MAX_DAY_WIDTH = 96
+const MIN_DAY_WIDTH = 1
+/** 容器尚未测量时的保守日宽：宁可首帧窄一点，也绝不先撑出横滚（AC-11） */
+export const UNMEASURED_DAY_WIDTH: Record<GanttZoom, number> = { day: 40, week: 10, month: 5 }
 const MIN_BAR_WIDTH = 10
 /** 刻度窄于此宽就隔一个标一次，避免日号糊成一片 */
 const THIN_LABEL_WIDTH = 56
@@ -125,10 +130,16 @@ export function zoomDays(zoom: GanttZoom): number {
   return ZOOM_DAYS[zoom]
 }
 
-/** 容器够宽就放宽到 96，窄到 40 就不再压缩（刻度抽稀，不横滚） */
+/**
+ * 日宽（AC-1/2/3）：`max(1, min(96, floor(timelineW / 天数)))`。
+ *
+ * 入参是**时间轴可用宽**（= `.gantt__scroll` 的 clientWidth − `LEFT_COLUMN`），
+ * 保证 `LEFT_COLUMN + 天数 × dayW ≤ 滚动视口宽`，三档都整屏落位、不横滚。
+ * 容器未测量（≤ 0）时返回档位保守值，首帧只会「变宽」不会「先超宽再回缩」。
+ */
 export function dayWidth(win: GanttWindow, timelineWidth: number): number {
   const days = windowDays(win) || ZOOM_DAYS[win.zoom]
-  if (!Number.isFinite(timelineWidth) || timelineWidth <= 0) return MIN_DAY_WIDTH
+  if (!Number.isFinite(timelineWidth) || timelineWidth <= 0) return UNMEASURED_DAY_WIDTH[win.zoom]
   return Math.max(MIN_DAY_WIDTH, Math.min(MAX_DAY_WIDTH, Math.floor(timelineWidth / days)))
 }
 

@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { nextTick } from 'vue'
 import { mount } from '@vue/test-utils'
 import { ApiError } from '@/api/http'
 import GanttChart from '@/components/gantt/GanttChart.vue'
-import { defaultWindow } from '@/composables/useGanttWindow'
+import { LEFT_COLUMN, defaultWindow } from '@/composables/useGanttWindow'
 import { projectKey, themeKey } from '@/composables/useGanttView'
 import type { GanttProjectGroup, GanttTask, GanttThemeGroup, GanttView } from '@/types/api'
 
@@ -300,5 +301,37 @@ describe('GanttChart · 空态 / 骨架 / 截断（AC-10、AC-12）', () => {
     expect(wrapper.text()).toContain('甘特图加载失败')
     await wrapper.find('.error-state button').trigger('click')
     expect(wrapper.emitted('retry')).toHaveLength(1)
+  })
+})
+
+describe('GanttChart · 左列同源与滚动视口上报（AC-1/2/3）', () => {
+  it('行网格与表头都取 LEFT_COLUMN，不再各写字面量 280', () => {
+    const wrapper = mountChart()
+    const expected = `grid-template-columns: ${LEFT_COLUMN}px 1fr`
+    expect(wrapper.find('.gantt__head').attributes('style')).toContain(expected)
+    expect(wrapper.find('.row').attributes('style')).toContain(expected)
+  })
+
+  it('挂载后按 .gantt__scroll.clientWidth 上报 resize，而不是外壳宽', async () => {
+    class FakeResizeObserver {
+      observe(): void {}
+      unobserve(): void {}
+      disconnect(): void {}
+    }
+    vi.stubGlobal('ResizeObserver', FakeResizeObserver)
+    try {
+      const wrapper = mountChart()
+      const scroll = wrapper.find('.gantt__scroll').element as HTMLElement
+      // 滚动视口 958（已扣纵向滚动条），外壳 1200：上报值必须是前者
+      Object.defineProperty(scroll, 'clientWidth', { configurable: true, value: 958 })
+      Object.defineProperty(wrapper.element, 'clientWidth', { configurable: true, value: 1200 })
+      await nextTick()
+      await nextTick()
+      const widths = (wrapper.emitted('resize') ?? []).map((call) => call[0])
+      expect(widths).toContain(958)
+      expect(widths).not.toContain(1200)
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 })

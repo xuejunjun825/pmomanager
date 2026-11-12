@@ -7,7 +7,7 @@
  * 2. 逾期 / 风险 / 起止全部是接口字段，页面只做像素与分组，没有任何日期差。
  * 3. 档位、筛选、折叠存在 useGanttView 的模块级单例里，进任务详情再回来不丢。
  */
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import PageHeader from '@/components/ui/PageHeader.vue'
 import AppButton from '@/components/ui/AppButton.vue'
@@ -21,6 +21,7 @@ import { toApiError, type ApiError } from '@/api/http'
 import { useToast } from '@/composables/useToast'
 import { themeKey, useGanttView } from '@/composables/useGanttView'
 import {
+  LEFT_COLUMN,
   defaultWindow,
   dayWidth,
   shiftWindow,
@@ -46,15 +47,13 @@ const loading = ref(false)
 const error = ref<ApiError | null>(null)
 const ownerId = ref<number | ''>('')
 const owners = ref<UserOption[]>([])
-const canvas = ref<HTMLElement | null>(null)
-const canvasWidth = ref(0)
+/** 来自 GanttChart 的 resize：`.gantt__scroll` 的 clientWidth（已扣除纵向滚动条） */
+const ganttWidth = ref(0)
 const seeded = ref(false)
 let seq = 0
-let observer: ResizeObserver | null = null
 
-const LEFT_COLUMN = 280
-
-const dayW = computed(() => dayWidth(win.value, canvasWidth.value - LEFT_COLUMN))
+const timelineW = computed(() => Math.max(0, ganttWidth.value - LEFT_COLUMN))
+const dayW = computed(() => dayWidth(win.value, timelineW.value))
 
 const zoomUnit = computed(() => ZOOMS.find((item) => item.value === view.zoom.value)?.unit ?? '')
 
@@ -244,19 +243,12 @@ async function onOwner(value: string | number | null): Promise<void> {
   await load()
 }
 
+function onResize(width: number): void {
+  ganttWidth.value = width
+}
+
 function openTask(id: number): void {
   void router.push(`/tasks/${id}`)
-}
-
-function measure(): void {
-  canvasWidth.value = canvas.value?.clientWidth ?? 0
-}
-
-function observe(): void {
-  measure()
-  if (typeof ResizeObserver === 'undefined' || !canvas.value) return
-  observer = new ResizeObserver(measure)
-  observer.observe(canvas.value)
 }
 
 async function loadOwners(): Promise<void> {
@@ -269,16 +261,8 @@ async function loadOwners(): Promise<void> {
 }
 
 onMounted(() => {
-  observe()
-  window.addEventListener('resize', measure)
   void load()
   void loadOwners()
-})
-
-onBeforeUnmount(() => {
-  observer?.disconnect()
-  observer = null
-  window.removeEventListener('resize', measure)
 })
 </script>
 
@@ -345,7 +329,7 @@ onBeforeUnmount(() => {
       </p>
     </div>
 
-    <div ref="canvas" class="gantt-page__canvas">
+    <div class="gantt-page__canvas">
       <GanttChart
         :groups="groups"
         :window="win"
@@ -359,6 +343,7 @@ onBeforeUnmount(() => {
         @toggle="view.toggle"
         @open="openTask"
         @retry="load"
+        @resize="onResize"
       >
         <template #empty>
           <EmptyState :title="emptyTitle" :description="emptyDescription">

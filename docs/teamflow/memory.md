@@ -16,6 +16,7 @@
 - 项目三处单一实现点（r4 起，禁止复制）：筛选谓词只有 `server/src/main/java/com/pmo/supervise/project/ProjectFilterSql.java:append()`（任务池/看板经 `TaskQueryBuilder`、矩阵经 `MatrixService` 共用，`none` = 未指定项目，走 `source_types` 子查询）；前端下拉投影只有 `web/src/utils/projectOptions.ts:projectOptions()`、项目位判定只有 `projectView()`，渲染只有 `web/src/components/ui/ProjectTag.vue`。任务池/矩阵/看板三处合计必须对齐，任何页面不得自拼项目条件或自行比较 `enabled/sort`。
 - 主题是归类维度不是权限维度（r7 起）：ADMIN 维护（名称唯一 2–20 字、上限 100、被任务引用只能停用），全员可读；任务可挂主题（可空 = 「未归主题」，不得回填历史行）。筛选单点 `server/.../theme/ThemeFilterSql.java:append()`，前端渲染只有 `web/src/components/ui/ThemeTag.vue`，页面不得自拼主题颜色或比较 `enabled`。
 - 甘特时间与风险口径（r7 起）：任务条起点 = `tasks.planned_start_date`，为空时按创建日期推算并在条上标注（**不回写库**）；终点只认 `due_date`，不新增计划结束日期。风险 = 逾期未完成 或 待验收且 `submitted_at` ≤ 今天−3 天；甘特接口直接下发 `isOverdue/overdueDays/isAtRisk`，前端不自算日期差；逾期任务不受甘特时间窗左边界裁剪。会议详情对 EXEC/OWNER 不开放，故任务→会议入口必须按角色渲染。
+- 甘特缩放口径（r8 起，取代 r7「40px 日宽下限优先」）：窗口天数固定（日 14 / 周 84 / 月 182），`dayWidth = max(1, min(96, floor(timelineW/天数)))`，整屏不横滚；容器未测量时按档位保守日宽回退，不得用 40px×天数撑出 3 倍宽；`MIN_BAR_WIDTH=10`、pinned 贴边、`THIN_LABEL_WIDTH=56` 抽稀不变。验收硬证据：周/月档探针 `visible>0 且 offRight=0`（含 month），截图落盘前断言可见条数>0 且档位与文件名一致。另：甘特条 tooltip 静止态必须 `display:none`（`visibility:hidden` 仍计入 `scrollWidth`，r7 遗留隐患曾让日档横滚 86px），悬停才显示，贴右缘条走 `.tip--mirror` 左镜像。
 - 错误体统一 `{code,message,fieldErrors,details,traceId}`，前端 `http.ts` 归一化；会话 7d，CSRF 使用明文 token 契约（`CsrfTokenRequestAttributeHandler`）。会话 id 只在登录成功时轮换一次（r5 起）：登录处显式一次换发、认证请求一律不换发 `SUPERVISE_SESSION`；不得用「关掉会话固定防护」或「前端 401 重试/串行化」换取并发稳定。
 - 契约文档只写 `docs/teamflow/<yyyyMMdd-rN-slug>/`；跨需求记忆在本文件。
 

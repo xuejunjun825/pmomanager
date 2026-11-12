@@ -4,11 +4,11 @@
  * 左列 280 sticky，时间轴列宽 = 窗口天数 × dayW；逾期条由接口保证绕出窗口返回，
  * 这里只按 barGeometry 的像素落位，不做任何日期比较（AC-7）。
  */
-import { computed } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { ApiError } from '@/api/http'
 import type { GanttProjectGroup, GanttTask, GanttThemeGroup } from '@/types/api'
 import type { GanttWindow } from '@/composables/useGanttWindow'
-import { buildTicks, dayOffset, monthBands, windowDays } from '@/composables/useGanttWindow'
+import { LEFT_COLUMN, buildTicks, dayOffset, monthBands, windowDays } from '@/composables/useGanttWindow'
 import { projectKey, themeKey } from '@/composables/useGanttView'
 import ErrorState from '@/components/ui/ErrorState.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
@@ -31,6 +31,8 @@ const emit = defineEmits<{
   (event: 'toggle', key: string): void
   (event: 'open', id: number): void
   (event: 'retry'): void
+  /** `.gantt__scroll` 的 clientWidth（已扣除纵向滚动条），供页面换算日宽 */
+  (event: 'resize', width: number): void
 }>()
 
 interface VisibleRow {
@@ -82,10 +84,53 @@ const rows = computed<VisibleRow[]>(() => {
 })
 
 const skeletonRows = [44, 32, 40, 40, 40, 32, 40, 40, 40]
+
+/**
+ * 滚动视口宽度上报（AC-1/2/3）：`.gantt__scroll` 是 overflow:auto 的真实滚动容器，
+ * 只有它的 clientWidth 扣除了纵向滚动条；按页面外壳宽算会让日档多出约 15px 而边缘横滚。
+ * `.gantt__scroll` 只在有行时渲染，所以根节点与滚动容器都挂观察，行数变化后 nextTick 复测。
+ */
+const rootEl = ref<HTMLElement | null>(null)
+const scrollEl = ref<HTMLElement | null>(null)
+let observer: ResizeObserver | null = null
+
+function reportWidth(): void {
+  emit('resize', scrollEl.value?.clientWidth ?? 0)
+}
+
+function observeSizes(): void {
+  if (typeof ResizeObserver === 'undefined') return
+  if (!observer) observer = new ResizeObserver(reportWidth)
+  else observer.disconnect()
+  if (rootEl.value) observer.observe(rootEl.value)
+  if (scrollEl.value) observer.observe(scrollEl.value)
+  reportWidth()
+}
+
+onMounted(() => {
+  void nextTick(observeSizes)
+})
+
+watch(
+  () => rows.value.length,
+  () => {
+    void nextTick(observeSizes)
+  },
+)
+
+// 骨架 / 错误 / 空态与有行态之间切换时 `.gantt__scroll` 会整体重挂，重新挂观察并上报
+watch(scrollEl, () => {
+  void nextTick(observeSizes)
+})
+
+onBeforeUnmount(() => {
+  observer?.disconnect()
+  observer = null
+})
 </script>
 
 <template>
-  <section class="gantt" aria-label="进度甘特图">
+  <section ref="rootEl" class="gantt" aria-label="进度甘特图">
     <div v-if="loading" class="gantt__skeleton" aria-busy="true" aria-label="加载中">
       <div class="gantt__sk-head" />
       <div v-for="(height, index) in skeletonRows" :key="index" class="gantt__sk-row" :style="{ height: `${height}px` }" />
@@ -112,9 +157,9 @@ const skeletonRows = [44, 32, 40, 40, 40, 32, 40, 40, 40]
       <p v-if="truncated" class="gantt__notice" role="status">
         窗口内共 {{ windowTotal }} 条，当前显示 300 条，请缩小时间范围或按负责人筛选
       </p>
-      <div class="gantt__scroll">
-        <div class="gantt__grid" :style="{ width: `${280 + totalWidth}px` }">
-          <div class="gantt__head">
+      <div ref="scrollEl" class="gantt__scroll">
+        <div class="gantt__grid" :style="{ width: `${LEFT_COLUMN + totalWidth}px` }">
+          <div class="gantt__head" :style="{ gridTemplateColumns: `${LEFT_COLUMN}px 1fr` }">
             <div class="gantt__corner">主题 / 项目 / 任务</div>
             <div class="gantt__head-axis" :style="{ width: `${totalWidth}px` }">
               <div class="gantt__bands">
@@ -192,7 +237,6 @@ const skeletonRows = [44, 32, 40, 40, 40, 32, 40, 40, 40]
   top: 0;
   z-index: var(--z-thead);
   display: grid;
-  grid-template-columns: 280px 1fr;
   height: 48px;
   background: var(--c-surface);
   border-bottom: 1px solid var(--c-line);

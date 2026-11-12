@@ -83,19 +83,35 @@ describe('useGanttWindow · 三档默认窗口与翻屏（AC-10）', () => {
   })
 })
 
-describe('useGanttWindow · dayW clamp 40–96', () => {
-  it('容器够宽时放宽到 96 上限', () => {
+describe('useGanttWindow · dayW 整屏整除（AC-1/2/3/11）', () => {
+  it('超宽容器仍以 96 封顶', () => {
     expect(dayWidth(defaultWindow('week', TODAY), 84 * 500)).toBe(96)
   })
 
-  it('容器不足时压到 40 下限，不再横滚', () => {
-    expect(dayWidth(defaultWindow('day', TODAY), 140)).toBe(40)
-    expect(dayWidth(defaultWindow('month', TODAY), 0)).toBe(40)
+  it('容器未测量时按档位保守回退（日 40 / 周 10 / 月 5）', () => {
+    expect(dayWidth(defaultWindow('day', TODAY), 0)).toBe(40)
+    expect(dayWidth(defaultWindow('week', TODAY), 0)).toBe(10)
+    expect(dayWidth(defaultWindow('month', TODAY), 0)).toBe(5)
   })
 
-  it('中间值按 floor(宽度 / 天数) 取整', () => {
-    expect(dayWidth(defaultWindow('day', TODAY), 700)).toBe(50)
-    expect(dayWidth(defaultWindow('week', TODAY), 84 * 60 + 20)).toBe(60)
+  it('实测宽按天数整除（1512 视口 timelineW = 958）', () => {
+    expect(dayWidth(defaultWindow('day', TODAY), 958)).toBe(68)
+    expect(dayWidth(defaultWindow('week', TODAY), 958)).toBe(11)
+    expect(dayWidth(defaultWindow('month', TODAY), 958)).toBe(5)
+  })
+
+  it('不横滚不变量：天数 × 日宽 ≤ 容器宽', () => {
+    for (const width of [320, 700, 958, 1238, 1600]) {
+      for (const zoom of ['day', 'week', 'month'] as const) {
+        const win = defaultWindow(zoom, TODAY)
+        expect(windowDays(win) * dayWidth(win, width), `${zoom}@${width}`).toBeLessThanOrEqual(width)
+      }
+    }
+  })
+
+  it('40px 下限已移除：日档 140px 得 10（旧值 40）', () => {
+    expect(dayWidth(defaultWindow('day', TODAY), 140)).toBe(10)
+    expect(dayWidth(defaultWindow('day', TODAY), 20)).toBe(1)
   })
 })
 
@@ -138,6 +154,26 @@ describe('useGanttWindow · 条几何', () => {
   it('短条保底 10px，日档最小宽度仍可点中', () => {
     const tiny = barGeometry(task({ startDate: '2026-11-12', dueDate: '2026-11-12' }), win, 4)
     expect(tiny.width).toBe(10)
+  })
+
+  it('三档实测日宽下条宽 ≥ 10 且 x + width 不越出时间轴（AC-4）', () => {
+    const samples = [
+      task(),
+      task({ startDate: '2026-10-01', dueDate: '2026-10-03', pinnedStart: true, isOverdue: true, overdueDays: 40 }),
+      task({ startDate: '2026-11-12', dueDate: '2027-06-01', pinnedEnd: true, isAtRisk: true }),
+      task({ startDate: '2027-03-01', dueDate: '2027-03-01' }),
+    ]
+    for (const zoom of ['day', 'week', 'month'] as const) {
+      const zoomWin = defaultWindow(zoom, TODAY)
+      const zoomDayW = dayWidth(zoomWin, 958)
+      const total = windowDays(zoomWin) * zoomDayW
+      for (const sample of samples) {
+        const geometry = barGeometry(sample, zoomWin, zoomDayW)
+        expect(geometry.width, `${zoom}#${sample.id}`).toBeGreaterThanOrEqual(10)
+        expect(geometry.x, `${zoom}#${sample.id}`).toBeGreaterThanOrEqual(0)
+        expect(geometry.x + geometry.width, `${zoom}#${sample.id}`).toBeLessThanOrEqual(total + 1)
+      }
+    }
   })
 })
 

@@ -172,4 +172,39 @@ describe('ThemeConfigTable', () => {
     expect(document.body.querySelector('.modal')).toBeTruthy()
     wrapper.unmount()
   })
+
+  it('列结构：6 列表头与首行 6 个 td 一一对应，名称/颜色格的 flex 容器是 td 内层 DIV', async () => {
+    const wrapper = mountTable([row(), row({ id: 2, name: '交付', color: '#b42318', enabled: false })])
+    await flushPromises()
+
+    const heads = wrapper.findAll('thead th').map((th) => th.text().trim())
+    expect(heads).toEqual(['名称', '颜色', '状态', '排序', '引用', '操作'])
+
+    const firstRow = wrapper.findAll('tbody tr')[0]
+    const cells = firstRow.findAll('td')
+    expect(cells).toHaveLength(heads.length)
+
+    // A-02 回归：flex 必须落在 td 内层 div，td 自身保持 table-cell（jsdom 无布局，computed display 由 Playwright 探针负责）
+    for (const [selector, innerClass] of [
+      ['td.cell-name', 'cell-name__inner'],
+      ['td.cell-color', 'cell-color__inner'],
+    ] as const) {
+      const td = firstRow.find(selector)
+      expect(td.exists()).toBe(true)
+      expect((td.element as HTMLElement).tagName).toBe('TD')
+      expect(td.attributes('style') ?? '').not.toContain('flex')
+      const inner = td.element.firstElementChild as HTMLElement
+      expect(inner.tagName).toBe('DIV')
+      expect(inner.classList.contains(innerClass)).toBe(true)
+      // td 下只有这一层容器，内容不再直接挂在 td 上
+      expect(td.element.children).toHaveLength(1)
+    }
+
+    // 内容未丢失：名称文字与色块仍在各自内层容器里
+    expect(firstRow.find('.cell-name__inner .cell-name__text').text()).toBe('安全')
+    expect(wrapper.findAll('tbody tr')[1].find('.cell-name__inner').text()).toContain('已停用')
+    expect(firstRow.find('.cell-color__inner .cell-color__dot').exists()).toBe(true)
+    expect(firstRow.find('.cell-color__inner').text()).toContain('墨蓝')
+    wrapper.unmount()
+  })
 })

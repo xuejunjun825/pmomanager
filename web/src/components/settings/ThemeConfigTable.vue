@@ -232,13 +232,17 @@ async function confirmDelete(): Promise<void> {
             :class="{ 'is-highlight': highlightId === item.id, 'is-busy': busyId === item.id }"
           >
             <td class="cell-name">
-              <span class="cell-name__dot" :style="{ backgroundColor: item.color }" aria-hidden="true" />
-              <span class="cell-name__text" :title="item.name">{{ item.name }}</span>
-              <span v-if="!item.enabled" class="cell-name__off">（已停用）</span>
+              <div class="cell-name__inner">
+                <span class="cell-name__dot" :style="{ backgroundColor: item.color }" aria-hidden="true" />
+                <span class="cell-name__text" :title="item.name">{{ item.name }}</span>
+                <span v-if="!item.enabled" class="cell-name__off">（已停用）</span>
+              </div>
             </td>
             <td class="cell-color">
-              <span class="cell-color__dot" :style="{ backgroundColor: item.color }" aria-hidden="true" />
-              <span>{{ colorName(item.color) || '自定义' }}</span>
+              <div class="cell-color__inner">
+                <span class="cell-color__dot" :style="{ backgroundColor: item.color }" aria-hidden="true" />
+                <span>{{ colorName(item.color) || '自定义' }}</span>
+              </div>
             </td>
             <td>
               <AppBadge :tone="item.enabled ? 'success' : 'neutral'" dot>
@@ -425,7 +429,16 @@ async function confirmDelete(): Promise<void> {
     background: transparent;
   }
 }
-.cell-name {
+/* 契约：td 必须保持 table-cell（列宽由 colgroup 决定）。
+   历史缺陷：flex 曾直接写在 td 上，td 脱离列宽计算，后 4 列整体左移一格。
+   布局一律下沉到 .cell-name__inner / .cell-color__inner，勿再写回 td。 */
+.theme-table td.cell-name,
+.theme-table td.cell-color {
+  display: table-cell;
+  color: var(--c-ink-700);
+}
+.cell-name__inner,
+.cell-color__inner {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -438,6 +451,7 @@ async function confirmDelete(): Promise<void> {
   border-radius: 50%;
 }
 .cell-name__text {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -449,13 +463,8 @@ async function confirmDelete(): Promise<void> {
   color: var(--c-ink-400);
   font-size: var(--fs-micro);
 }
-.cell-color {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--c-ink-700);
-}
 .cell-color__dot {
+  flex: none;
   width: 10px;
   height: 10px;
   border-radius: 50%;
