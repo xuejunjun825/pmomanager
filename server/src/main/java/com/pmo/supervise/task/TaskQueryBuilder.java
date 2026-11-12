@@ -25,10 +25,19 @@ public class TaskQueryBuilder {
 
     private final SourceTypeService sourceTypes;
     private final ProjectFilterSql projectFilter;
+    private final ThemeFilterSql themeFilter;
 
+    /** 单测便捷构造：主题谓词无依赖，直接 new 一个真实实例即可。 */
     public TaskQueryBuilder(SourceTypeService sourceTypes, ProjectFilterSql projectFilter) {
+        this(sourceTypes, projectFilter, new ThemeFilterSql());
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public TaskQueryBuilder(SourceTypeService sourceTypes, ProjectFilterSql projectFilter,
+                            ThemeFilterSql themeFilter) {
         this.sourceTypes = sourceTypes;
         this.projectFilter = projectFilter;
+        this.themeFilter = themeFilter;
     }
 
     public TaskQuery build(TaskFilter filter, LocalDate today) {
@@ -56,6 +65,8 @@ public class TaskQueryBuilder {
         }
         // 项目谓词只有一份：任务池 / 看板 / 矩阵都从这里走（AC-5「同源」的结构保证）。
         projectFilter.append(where, params, f.getProject());
+        // 主题谓词同样只有一份：任务池 / 看板 / 矩阵 / 甘特都从这里走（AC-13「同源」）。
+        themeFilter.append(where, params, f.getTheme());
         if (f.getMeetingId() != null) {
             where.append(" AND t.source_meeting_id = :meetingId");
             params.put("meetingId", f.getMeetingId());

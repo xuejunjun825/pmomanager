@@ -12,7 +12,24 @@ import type {
   MeetingRequest,
   MeetingRow,
   PageResponse,
+  TaskRow,
 } from '@/types/api'
+
+/**
+ * 建会请求（r7 / AC-2）：在既有 `MeetingRequest` 之上带 0..N 条决议。
+ * `items` 为空/缺省时与 r1 完全一致（只建会议），旧调用方零变化。
+ * 声明在 api 层而非 `types/api.ts`：该文件由 T5 独占，本轮不并发改写。
+ */
+export interface MeetingCreateRequest extends MeetingRequest {
+  items?: DecisionItemRequest[]
+}
+
+/** 转任务请求（r7 / AC-9）：一次批量统一挂主题与计划开始 */
+export interface ConvertPayload {
+  itemIds: number[]
+  themeId?: number | null
+  plannedStartDate?: string | null
+}
 
 export interface MeetingQuery {
   /** 后端是按 archived 精确过滤：false = 进行中，true = 已归档视图 */
@@ -37,8 +54,16 @@ export const meetingApi = {
     return apiGet<MeetingDetail>(`/meetings/${id}`)
   },
 
-  create(req: MeetingRequest): Promise<MeetingDetail> {
+  create(req: MeetingCreateRequest): Promise<MeetingDetail> {
     return apiPost<MeetingDetail>('/meetings', req)
+  },
+
+  /**
+   * 该会议已转出的任务（AC-4）：进度区的 4 个计数只从这一个数组算出，
+   * 不再读列表页的 taskCount / unfinishedCount，避免两套口径。
+   */
+  tasks(id: number): Promise<TaskRow[]> {
+    return apiGet<TaskRow[]>(`/meetings/${id}/tasks`)
   },
 
   update(id: number, req: MeetingRequest): Promise<MeetingDetail> {
@@ -63,8 +88,12 @@ export const meetingApi = {
   },
 
   /** 勾选转任务：部分成功是正常结果，不整批回滚（AC-4） */
-  convert(meetingId: number, itemIds: number[]): Promise<ConvertResult> {
-    return apiPost<ConvertResult>(`/meetings/${meetingId}/convert`, { itemIds })
+  /**
+   * 转任务（AC-9）：一次批量统一挂主题/计划开始，后端逐条写入后再返回，
+   * 主题停用或 plannedStart > 某条 dueDate 时整体 422，不会只转一半。
+   */
+  convert(meetingId: number, payload: ConvertPayload): Promise<ConvertResult> {
+    return apiPost<ConvertResult>(`/meetings/${meetingId}/convert`, payload)
   },
 }
 

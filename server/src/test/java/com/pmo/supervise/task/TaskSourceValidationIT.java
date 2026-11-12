@@ -49,7 +49,7 @@ class TaskSourceValidationIT extends IntegrationTestSupport {
     private CreateTaskRequest request(String title, String sourceType, Long meetingId,
                                       Long decisionItemId, String note, Long projectId) {
         return new CreateTaskRequest(title, owner, LocalDate.of(2026, 11, 20), sourceType,
-                meetingId, decisionItemId, note, Priority.MEDIUM, projectId);
+                meetingId, decisionItemId, note, Priority.MEDIUM, projectId, null, null);
     }
 
     @Test

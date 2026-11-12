@@ -49,6 +49,14 @@ public class Task {
     @Column(name = "source_project_id")
     private Long sourceProjectId;
 
+    /** 主题（r7）：可空 = 未归主题；停用主题不阻断历史任务，只阻止新选/改选。 */
+    @Column(name = "theme_id")
+    private Long themeId;
+
+    /** 计划开始（r7）：甘特条的起点；空则甘特以 due_date 单点（estimatedStart）绘制。 */
+    @Column(name = "planned_start_date")
+    private LocalDate plannedStartDate;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 16)
     private TaskStatus status = TaskStatus.PENDING;
@@ -151,6 +159,22 @@ public class Task {
 
     public void setSourceProjectId(Long sourceProjectId) {
         this.sourceProjectId = sourceProjectId;
+    }
+
+    public Long getThemeId() {
+        return themeId;
+    }
+
+    public void setThemeId(Long themeId) {
+        this.themeId = themeId;
+    }
+
+    public LocalDate getPlannedStartDate() {
+        return plannedStartDate;
+    }
+
+    public void setPlannedStartDate(LocalDate plannedStartDate) {
+        this.plannedStartDate = plannedStartDate;
     }
 
     public TaskStatus getStatus() {

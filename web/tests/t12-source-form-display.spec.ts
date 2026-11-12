@@ -163,11 +163,13 @@ describe('来源形态展示不按来源编码判断（D-01）', () => {
     expect(wrapper.text()).toContain('客户评审会 A')
   })
 
-  it('详情：自定义会议形态来源渲染 /meetings/:id 链接与会议标题', async () => {
+  it('详情：自定义会议形态来源渲染会议标题，非管理员降级为纯文本 + 说明（AC-5）', async () => {
     const wrapper = await mountDetail(customMeetingSource)
 
-    expect(wrapper.html()).toContain('/meetings/9')
+    // 本用例未注入 ADMIN 会话：会议详情仅管理员可读，因此不再渲染可点链接
+    expect(wrapper.html()).not.toContain('/meetings/9')
     expect(wrapper.text()).toContain('客户评审会 A')
+    expect(wrapper.find('.source__hint').text()).toBe('仅管理员可查看会议')
     wrapper.unmount()
   })
 

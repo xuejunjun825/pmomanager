@@ -42,7 +42,7 @@ class MeetingServiceIT extends IntegrationTestSupport {
     private MeetingDetail newMeeting(String title, long... attendeeIds) {
         List<Long> ids = java.util.Arrays.stream(attendeeIds).boxed().toList();
         return meetingService.create(admin(), new MeetingRequest(title, LocalDate.of(2026, 11, 1),
-                "主持人", ids, "周会纪要"), clock.today());
+                "主持人", ids, "周会纪要", null), clock.today());
     }
 
     private long addItem(long meetingId, String description, long ownerId) {
@@ -203,7 +203,7 @@ class MeetingServiceIT extends IntegrationTestSupport {
         assertThat(meetingService.get(meetingId, clock.today()).archived()).isTrue();
 
         assertThatThrownBy(() -> meetingService.update(meetingId, admin(),
-                new MeetingRequest("改名", LocalDate.of(2026, 11, 1), "主持人", List.of(), null),
+                new MeetingRequest("改名", LocalDate.of(2026, 11, 1), "主持人", List.of(), null, null),
                 clock.today()))
                 .isInstanceOfSatisfying(BusinessException.class, ex ->
                         assertThat(ex.code()).isEqualTo(ErrorCode.MEETING_ARCHIVED));

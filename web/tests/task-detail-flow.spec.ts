@@ -143,7 +143,7 @@ describe('TaskDetailPage 主路径', () => {
 
     expect(mocks.start).toHaveBeenCalledWith(5)
     expect(wrapper.text()).toContain('提交验收')
-    expect(wrapper.find('.steps__item.is-current').text()).toContain('进行中')
+    expect(wrapper.find('.flow__step.is-current').text()).toContain('进行')
   })
 
   it('409 时重取详情，状态与按钮都跟着服务端刷新', async () => {

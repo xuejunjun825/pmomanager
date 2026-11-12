@@ -19,8 +19,12 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * 原生 SQL 读模型（TECHNICAL §4.4）：分页、详情、焦点、KPI 计数。
- * 聚合与 is_overdue 只在这一层算，任何页面都拿不到第二套数字。
+ * 原生 SQL 读模型（TECHNICAL §4.4）：分页、详情、焦点、会议任务区、KPI 计数。
+ * 聚合、is_overdue、at_risk 与主题三色只在这一层算，任何页面都拿不到第二套数字。
+ *
+ * <p>r7：{@code SELECT_BASE} 追加 planned_start_date / 主题三列 / at_risk，并 LEFT JOIN themes；
+ * 任务池、详情、会议任务区与甘特（GanttDao）全部复用这一份列集与 {@link TaskRowMapper}，
+ * 主题色与风险不会在第二个映射器里漂移。
  */
 @Repository
 public class TaskQueryDao {
@@ -32,6 +36,8 @@ public class TaskQueryDao {
                    t.source_meeting_id, m.title AS meeting_title,
                    t.source_decision_item_id, t.source_note,
                    t.source_project_id, p.name AS project_name, p.enabled AS project_enabled,
+                   t.theme_id, th.name AS theme_name, th.color AS theme_color, th.enabled AS theme_enabled,
+                   t.planned_start_date,
                    t.status, t.priority,
                    t.dispatcher_id, d.name AS dispatcher_name, d.role AS dispatcher_role,
                    t.completion_note, t.completion_url, t.submitted_at, t.completed_at,
@@ -39,6 +45,7 @@ public class TaskQueryDao {
                    CASE WHEN %s THEN 1 ELSE 0 END AS is_overdue,
                    CASE WHEN %s THEN DATEDIFF(:today, t.due_date) ELSE 0 END AS overdue_days,
                    CASE WHEN %s THEN 1 ELSE 0 END AS due_soon,
+                   CASE WHEN %s THEN 1 ELSE 0 END AS at_risk,
                    (SELECT COUNT(*) FROM urge_records ur WHERE ur.task_id = t.id) AS urge_count,
                    (SELECT MAX(ur.created_at) FROM urge_records ur WHERE ur.task_id = t.id) AS last_urged_at
             FROM tasks t
@@ -47,7 +54,8 @@ public class TaskQueryDao {
             LEFT JOIN meetings m ON m.id = t.source_meeting_id
             LEFT JOIN source_types st ON st.code = t.source_type
             LEFT JOIN projects p ON p.id = t.source_project_id
-            """.formatted(TaskSql.OVERDUE, TaskSql.OVERDUE, TaskSql.DUE_SOON);
+            LEFT JOIN themes th ON th.id = t.theme_id
+            """.formatted(TaskSql.OVERDUE, TaskSql.OVERDUE, TaskSql.DUE_SOON, TaskSql.AT_RISK);
 
     private static final String COUNT_BASE = """
             SELECT COUNT(*)
@@ -89,8 +97,22 @@ public class TaskQueryDao {
     }
 
     /**
-     * 任务行读模型的唯一列集 + join（含 source_types 取名取色）。
-     * 看板焦点列表也复用同一份，来源 join 不会两处各拼一次而漂移。
+     * 会议任务区（r7 / AC-4）：一个会议的转出任务一次取全，供进度区单一口径计数。
+     * 上限 500 与会议决议上限（50）同量级留足余量；排序让同一决议的续办任务相邻。
+     */
+    public List<TaskRow> byMeeting(long meetingId, LocalDate today) {
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put("today", today);
+        params.put("tomorrow", today.plusDays(1));
+        params.put("meetingId", meetingId);
+        String sql = SELECT_BASE + " WHERE t.source_meeting_id = :meetingId"
+                + " ORDER BY t.due_date ASC, t.id ASC LIMIT 500";
+        return jdbc.query(sql, params, (rs, rowNum) -> TaskRowMapper.mapRow(rs));
+    }
+
+    /**
+     * 任务行读模型的唯一列集 + join（含 source_types 取名取色、themes 取名取色）。
+     * 看板焦点、会议任务区与甘特都复用同一份，来源/主题 join 不会两处各拼一次而漂移。
      */
     public static String selectBase() {
         return SELECT_BASE;
@@ -108,7 +130,7 @@ public class TaskQueryDao {
         return jdbc.query(sql, params, (rs, rowNum) -> TaskRowMapper.mapRow(rs));
     }
 
-    /** 看板 6 项 KPI 的唯一计数口径。 */
+    /** 看板 6 项 KPI 的唯一计数口径（r7 追加第 7 项 risk，看板仍取前 6 项）。 */
     public TaskCounters counters(TaskFilter filter, LocalDate today) {
         TaskQueryBuilder.TaskQuery query = queryBuilder.build(filter, today);
         String sql = """
@@ -117,17 +139,19 @@ public class TaskQueryDao {
                        COALESCE(SUM(CASE WHEN %s THEN 1 ELSE 0 END), 0) AS overdue,
                        COALESCE(SUM(CASE WHEN %s THEN 1 ELSE 0 END), 0) AS due_soon,
                        COALESCE(SUM(CASE WHEN t.status = 'PENDING_ACCEPT' THEN 1 ELSE 0 END), 0) AS pending_accept,
-                       COALESCE(SUM(CASE WHEN t.status = 'DONE' THEN 1 ELSE 0 END), 0) AS done
+                       COALESCE(SUM(CASE WHEN t.status = 'DONE' THEN 1 ELSE 0 END), 0) AS done,
+                       COALESCE(SUM(CASE WHEN %s THEN 1 ELSE 0 END), 0) AS risk
                 FROM tasks t
                 JOIN users u ON u.id = t.owner_id
-                """.formatted(TaskSql.NOT_FINISHED, TaskSql.OVERDUE, TaskSql.DUE_SOON);
+                """.formatted(TaskSql.NOT_FINISHED, TaskSql.OVERDUE, TaskSql.DUE_SOON, TaskSql.AT_RISK);
         return jdbc.queryForObject(sql + query.where(), query.params(), (rs, rowNum) -> new TaskCounters(
                 rs.getLong("total"),
                 rs.getLong("unfinished"),
                 rs.getLong("overdue"),
                 rs.getLong("due_soon"),
                 rs.getLong("pending_accept"),
-                rs.getLong("done")));
+                rs.getLong("done"),
+                rs.getLong("risk")));
     }
 
     public List<TaskEventRow> events(long taskId) {

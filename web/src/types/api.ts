@@ -211,6 +211,12 @@ export interface TaskRow {
   lastUrgedAt?: string | null
   updatedAt: string
   completedAt?: string | null
+  /** 主题快照（r7）：三色由后端派生，前端不解析 hex；未挂主题为 null */
+  theme?: ThemeRef | null
+  /** 计划开始（r7，可空）；甘特起点优先用它，为空时由后端按创建日推算 */
+  plannedStartDate?: string | null
+  /** 风险（r7）：逾期未完成 或 待验收 ≥3 天；由服务端算好，前端不推算 */
+  atRisk?: boolean
 }
 
 export interface TaskEvent {
@@ -258,6 +264,8 @@ export interface TaskFilter extends PageQuery {
   sourceType?: SourceType | ''
   /** 项目筛选：`'<id>'` | `'none'`（未指定项目） | `''`（全部） */
   project?: string
+  /** 主题筛选：`'<id>'` | `'none'`（未挂主题） | `''`（全部） */
+  theme?: string
   meetingId?: number | ''
   overdue?: boolean | ''
   keyword?: string
@@ -274,6 +282,10 @@ export interface CreateTaskRequest {
   sourceNote?: string
   /** 项目形态必填；其他形态必须为空（服务端单点判定，非项目形态带它会 422） */
   sourceProjectId?: number | null
+  /** 主题（r7，可空）：留空落「未归主题」 */
+  themeId?: number | null
+  /** 计划开始（r7，可空）：必须 ≤ 截止日期，否则 422 */
+  plannedStartDate?: string | null
   priority?: Priority
 }
 
@@ -283,6 +295,11 @@ export interface UpdateTaskRequest {
   dueDate?: string
   priority?: Priority
   sourceNote?: string
+  /** `null` = 不改；`0` = 清空主题（服务端语义，避免与「未传」混淆） */
+  themeId?: number | null
+  plannedStartDate?: string | null
+  /** 日期控件没有 0 语义，用显式开关清空计划开始 */
+  clearPlannedStart?: boolean
 }
 
 export interface SubmitCommand {
@@ -514,6 +531,8 @@ export interface MetaOptions {
   sourceTypes: SourceTypeOption[]
   /** 项目不是权限维度：不做角色收窄，全员拿全量（否则历史任务显示不出项目名） */
   projects: ProjectOptionRow[]
+  /** 主题（r7）：全员可读含停用项（前端置灰），一次拿全，页面不再各调一个主题接口 */
+  themes: ThemeOptionRow[]
   statuses: Array<{ value: TaskStatus; label: string }>
   priorities: Array<{ value: Priority; label: string }>
 }
@@ -524,4 +543,118 @@ export interface JobRunRow {
   runDate: string
   finishedAt?: string | null
   detail?: string | null
+}
+
+/* ---------------------------------------------------------------- 主题（r7） */
+
+/** 主题行（设置页）：usageCount 由后端 count，用来判断能否删除 */
+export interface ThemeRow {
+  id: number
+  name: string
+  color: string
+  softColor: string
+  borderColor: string
+  sort: number
+  enabled: boolean
+  usageCount: number
+}
+
+/** 主题选项（任务表单 / 筛选栏）：不带 usageCount，避免 meta 接口做 count 子查询 */
+export interface ThemeOptionRow {
+  id: number
+  name: string
+  color: string
+  softColor: string
+  borderColor: string
+  sort: number
+  enabled: boolean
+}
+
+/** 任务行上的主题快照：三色由后端派生，页面不再查主题表 */
+export interface ThemeRef {
+  id: number
+  name: string
+  color: string
+  softColor: string
+  borderColor: string
+  enabled: boolean
+}
+
+/** 主题写请求（与 ProjectPayload 同构，前端复用表单校验） */
+export interface ThemePayload {
+  name: string
+  color: string
+  sort?: number | null
+  enabled?: boolean
+}
+
+/* ---------------------------------------------------------------- 甘特（r7） */
+
+export type GanttZoom = 'day' | 'week' | 'month'
+
+/** 摘要 chip：'' 表示不筛（全部） */
+export type GanttQuickFilter = 'overdue' | 'risk' | 'inProgress' | 'pendingAccept' | 'done' | ''
+
+export interface GanttTask {
+  id: number
+  title: string
+  owner: UserRef
+  status: TaskStatus
+  statusLabel: string
+  startDate: string
+  plannedStartDate: string | null
+  dueDate: string
+  estimatedStart: boolean
+  isOverdue: boolean
+  overdueDays: number
+  isAtRisk: boolean
+  /** 逾期条贴左边界（左帽虚线），不因窗口裁剪而消失 */
+  pinnedStart: boolean
+  /** 右界外的风险条贴右边界（红色三角夹标） */
+  pinnedEnd: boolean
+  projectId: number | null
+  projectName: string | null
+  sourceLabel: string
+  sourceColor: string
+}
+
+export interface GanttProjectGroup {
+  projectId: number | null
+  projectName: string | null
+  unspecified: boolean
+  taskCount: number
+  tasks: GanttTask[]
+}
+
+export interface GanttThemeGroup {
+  themeId: number | null
+  themeName: string
+  color: string
+  softColor: string
+  borderColor: string
+  enabled: boolean
+  unassigned: boolean
+  taskCount: number
+  overdueCount: number
+  riskCount: number
+  projects: GanttProjectGroup[]
+}
+
+export interface GanttSummary {
+  overdue: number
+  risk: number
+  inProgress: number
+  pendingAccept: number
+  done: number
+  unassigned: number
+}
+
+export interface GanttView {
+  today: string
+  from: string
+  to: string
+  truncated: boolean
+  windowTotal: number
+  summary: GanttSummary
+  groups: GanttThemeGroup[]
 }

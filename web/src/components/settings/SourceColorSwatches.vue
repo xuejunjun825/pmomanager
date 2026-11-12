@@ -8,10 +8,18 @@
 import { computed, nextTick, ref } from 'vue'
 import type { SourcePaletteEntry } from '@/types/api'
 
-const props = defineProps<{
-  modelValue: string
-  options: SourcePaletteEntry[]
-}>()
+const props = withDefaults(
+  defineProps<{
+    modelValue: string
+    options: SourcePaletteEntry[]
+    /**
+     * radiogroup 的无障碍名称。同一份色板被来源与主题两个弹窗复用，
+     * 读屏若恒念「来源颜色」会把上下文说错；默认值保持既有来源弹窗的口径。
+     */
+    label?: string
+  }>(),
+  { label: '来源颜色' },
+)
 
 const emit = defineEmits<{ 'update:modelValue': [value: string] }>()
 
@@ -59,7 +67,7 @@ function tabIndexAt(index: number): number {
 
 <template>
   <div class="swatches">
-    <div v-if="options.length" class="swatches__row" role="radiogroup" aria-label="来源颜色">
+    <div v-if="options.length" class="swatches__row" role="radiogroup" :aria-label="label">
       <button
         v-for="(entry, index) in options"
         :key="entry.color"

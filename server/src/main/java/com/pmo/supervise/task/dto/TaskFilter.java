@@ -16,6 +16,8 @@ public class TaskFilter {
     /** 项目筛选：项目 id，或 {@code none} 取「来源形态为项目型但任务无项目」的历史任务。 */
     private String project;
     private Long meetingId;
+    /** 主题筛选：主题 id，或 {@code none} 取未归主题；空 = 不筛（r7 / AC-13）。 */
+    private String theme;
     private Boolean overdue;
     private String keyword;
 
@@ -69,6 +71,14 @@ public class TaskFilter {
 
     public void setMeetingId(Long meetingId) {
         this.meetingId = meetingId;
+    }
+
+    public String getTheme() {
+        return theme;
+    }
+
+    public void setTheme(String theme) {
+        this.theme = theme;
     }
 
     public Boolean getOverdue() {

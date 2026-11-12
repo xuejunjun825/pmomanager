@@ -17,6 +17,7 @@ import com.pmo.supervise.task.dto.TaskEventRow;
 import com.pmo.supervise.task.dto.TaskPermissions;
 import com.pmo.supervise.task.dto.UpdateTaskRequest;
 import com.pmo.supervise.task.dto.UserRef;
+import com.pmo.supervise.theme.ThemeService;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -40,16 +41,18 @@ public class TaskService {
     private final JdbcTemplate jdbc;
     private final SourceTypeService sourceTypes;
     private final ProjectService projects;
+    private final ThemeService themes;
 
     public TaskService(TaskRepository taskRepository, TaskQueryDao queryDao,
                        TaskAccessGuard guard, JdbcTemplate jdbc,
-                       SourceTypeService sourceTypes, ProjectService projects) {
+                       SourceTypeService sourceTypes, ProjectService projects, ThemeService themes) {
         this.taskRepository = taskRepository;
         this.queryDao = queryDao;
         this.guard = guard;
         this.jdbc = jdbc;
         this.sourceTypes = sourceTypes;
         this.projects = projects;
+        this.themes = themes;
     }
 
     @Transactional
@@ -57,6 +60,8 @@ public class TaskService {
         guard.requireAdmin(actor);
         validateOwner(req.ownerId());
         SourceTypeConfig source = validateSource(req);
+        validateThemeSelectable(req.themeId());
+        validatePlannedStart(req.plannedStartDate(), req.dueDate());
 
         // 按形态归一：每条任务只落一组来源字段，形态之外的一律写 null（库层 CHECK 兜底）。
         boolean meetingForm = source.form() == SourceForm.MEETING;
@@ -70,6 +75,8 @@ public class TaskService {
         task.setSourceDecisionItemId(meetingForm ? req.sourceDecisionItemId() : null);
         task.setSourceNote(meetingForm || projectForm ? null : trimToNull(req.sourceNote()));
         task.setSourceProjectId(projectForm ? req.sourceProjectId() : null);
+        task.setThemeId(req.themeId());
+        task.setPlannedStartDate(req.plannedStartDate());
         task.setStatus(TaskStatus.PENDING);
         task.setDispatcherId(actor.id());
         task.setPriority(req.priority() == null ? Priority.MEDIUM : req.priority());
@@ -103,6 +110,22 @@ public class TaskService {
         }
         if (req.priority() != null) {
             task.setPriority(req.priority());
+        }
+        // themeId：null = 不改；0 = 清空（未归主题）；其它 = 改选（必须是启用中的主题）。
+        if (req.themeId() != null) {
+            if (req.themeId() == 0L) {
+                task.setThemeId(null);
+            } else {
+                validateThemeSelectable(req.themeId());
+                task.setThemeId(req.themeId());
+            }
+        }
+        // 计划开始：clearPlannedStart 显式清空（日期控件没有 0 语义），否则非空即改。
+        if (req.clearPlannedStart()) {
+            task.setPlannedStartDate(null);
+        } else if (req.plannedStartDate() != null) {
+            validatePlannedStart(req.plannedStartDate(), task.getDueDate());
+            task.setPlannedStartDate(req.plannedStartDate());
         }
         taskRepository.saveAndFlush(task);
         return load(id, actor, today);
@@ -278,6 +301,21 @@ public class TaskService {
             }
         }
         return config;
+    }
+
+    /**
+     * 主题可选性（r7 / AC-9、AC-10）：只接受启用中的主题，判定与文案归 ThemeService
+     * （422 + fieldErrors.themeId，前端回填并聚焦）。null = 未归主题，合法。
+     */
+    private void validateThemeSelectable(Long themeId) {
+        themes.requireSelectable(themeId);
+    }
+
+    /** 计划开始不得晚于截止日期（r7 / AC-10）：同日合法，空值不校验。 */
+    private static void validatePlannedStart(LocalDate plannedStartDate, LocalDate dueDate) {
+        if (plannedStartDate != null && dueDate != null && plannedStartDate.isAfter(dueDate)) {
+            throw BusinessException.validation("plannedStartDate", "计划开始不能晚于截止日期");
+        }
     }
 
     private static boolean hasText(String value) {

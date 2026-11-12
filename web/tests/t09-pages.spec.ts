@@ -343,7 +343,18 @@ describe('MeetingDetailPage', () => {
     await buttonByText(wrapper, '转为任务')[0].trigger('click')
     await flushPromises()
 
-    expect(meetingApiMock.convert).toHaveBeenCalledWith(1, [11])
+    // AC-9：转任务要统一挂主题与计划开始，所以「转为任务」只负责开弹窗，
+    // 真正发请求的是弹窗里的确认按钮（一次批量作用于全部勾选项）。
+    expect(wrapper.find('.modal').exists()).toBe(true)
+    expect(wrapper.text()).toContain('已勾选 1 条决议')
+    await buttonByText(wrapper, '转换为任务（1 条）')[0].trigger('click')
+    await flushPromises()
+
+    expect(meetingApiMock.convert).toHaveBeenCalledWith(1, {
+      itemIds: [11],
+      themeId: null,
+      plannedStartDate: null,
+    })
     const toasts = useUiStore(pinia).toasts
     expect(toasts.some((toast) => toast.message === '已生成 1 条任务，1 项此前已转任务已跳过')).toBe(true)
     // 终态：勾选清空、底部转化条消失、详情重新拉取（已转事项在刷新后锁定为不可勾选）

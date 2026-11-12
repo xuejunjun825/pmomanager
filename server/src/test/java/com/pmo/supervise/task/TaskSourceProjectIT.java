@@ -108,7 +108,7 @@ class TaskSourceProjectIT extends IntegrationTestSupport {
     @DisplayName("项目来源携带说明或会议字段 → 400 PROJECT_SOURCE_CONFLICT（先于缺选 422）")
     void projectFormRejectsNoteAndMeetingFields() {
         CreateTaskRequest withNote = new CreateTaskRequest("带说明", owner, LocalDate.of(2026, 11, 20),
-                projectSourceCode, null, null, "顺手写点说明", Priority.MEDIUM, projectId);
+                projectSourceCode, null, null, "顺手写点说明", Priority.MEDIUM, projectId, null, null);
         assertThatThrownBy(() -> taskService.create(actor(adminId), withNote, today))
                 .isInstanceOfSatisfying(BusinessException.class, ex -> {
                     assertThat(ex.code()).isEqualTo(ErrorCode.PROJECT_SOURCE_CONFLICT);
@@ -119,7 +119,7 @@ class TaskSourceProjectIT extends IntegrationTestSupport {
         long meeting = seedMeeting("周会", adminId);
         long item = seedDecisionItem(meeting, "输出纪要", owner);
         CreateTaskRequest withMeeting = new CreateTaskRequest("带会议", owner, LocalDate.of(2026, 11, 20),
-                projectSourceCode, meeting, item, null, Priority.MEDIUM, projectId);
+                projectSourceCode, meeting, item, null, Priority.MEDIUM, projectId, null, null);
         assertThatThrownBy(() -> taskService.create(actor(adminId), withMeeting, today))
                 .isInstanceOfSatisfying(BusinessException.class, ex -> {
                     assertThat(ex.code()).isEqualTo(ErrorCode.PROJECT_SOURCE_CONFLICT);
@@ -129,7 +129,7 @@ class TaskSourceProjectIT extends IntegrationTestSupport {
 
         // 同时缺项目（422）与带说明（400）：结构冲突优先，保证 QA 能稳定复现 400。
         CreateTaskRequest both = new CreateTaskRequest("两者都错", owner, LocalDate.of(2026, 11, 20),
-                projectSourceCode, null, null, "说明", Priority.MEDIUM, null);
+                projectSourceCode, null, null, "说明", Priority.MEDIUM, null, null, null);
         assertThatThrownBy(() -> taskService.create(actor(adminId), both, today))
                 .isInstanceOfSatisfying(BusinessException.class,
                         ex -> assertThat(ex.code()).isEqualTo(ErrorCode.PROJECT_SOURCE_CONFLICT));
@@ -139,7 +139,7 @@ class TaskSourceProjectIT extends IntegrationTestSupport {
     @DisplayName("说明型/会议型来源带 sourceProjectId → 422 非项目来源不能关联项目")
     void nonProjectFormRejectsProjectId() {
         CreateTaskRequest noteForm = new CreateTaskRequest("说明型带项目", owner, LocalDate.of(2026, 11, 20),
-                "PROJECT", null, null, "晨会安排", Priority.MEDIUM, projectId);
+                "PROJECT", null, null, "晨会安排", Priority.MEDIUM, projectId, null, null);
         assertThatThrownBy(() -> taskService.create(actor(adminId), noteForm, today))
                 .isInstanceOfSatisfying(BusinessException.class, ex -> {
                     assertThat(ex.code()).isEqualTo(ErrorCode.VALIDATION_FAILED);
@@ -149,7 +149,7 @@ class TaskSourceProjectIT extends IntegrationTestSupport {
         long meeting = seedMeeting("周会", adminId);
         long item = seedDecisionItem(meeting, "输出纪要", owner);
         CreateTaskRequest meetingForm = new CreateTaskRequest("会议型带项目", owner, LocalDate.of(2026, 11, 20),
-                "MEETING", meeting, item, null, Priority.MEDIUM, projectId);
+                "MEETING", meeting, item, null, Priority.MEDIUM, projectId, null, null);
         assertThatThrownBy(() -> taskService.create(actor(adminId), meetingForm, today))
                 .isInstanceOfSatisfying(BusinessException.class, ex -> {
                     assertThat(ex.code()).isEqualTo(ErrorCode.VALIDATION_FAILED);
@@ -163,7 +163,7 @@ class TaskSourceProjectIT extends IntegrationTestSupport {
         long taskId = taskService.create(actor(adminId), projectRequest("不可改项目", projectId), today).id();
 
         assertThatThrownBy(() -> taskService.update(taskId, actor(adminId),
-                new UpdateTaskRequest(null, null, null, null, null, null, null, null, projectId), today))
+                new UpdateTaskRequest(null, null, null, null, null, null, null, null, projectId, null, null, false), today))
                 .isInstanceOfSatisfying(BusinessException.class,
                         ex -> assertThat(ex.code()).isEqualTo(ErrorCode.TASK_SOURCE_IMMUTABLE));
     }
@@ -199,7 +199,7 @@ class TaskSourceProjectIT extends IntegrationTestSupport {
 
     private CreateTaskRequest projectRequest(String title, Long projectId) {
         return new CreateTaskRequest(title, owner, LocalDate.of(2026, 11, 20), projectSourceCode,
-                null, null, null, Priority.MEDIUM, projectId);
+                null, null, null, Priority.MEDIUM, projectId, null, null);
     }
 
     private long seedProject(String code, String name, boolean enabled) {

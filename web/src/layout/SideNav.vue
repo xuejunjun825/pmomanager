@@ -20,6 +20,7 @@ const currentPath = computed(() => route.path)
 const ICONS: Record<NavIcon, string[]> = {
   dashboard: ['M2.5 2.5h4v5h-4z', 'M9.5 2.5h4v3h-4z', 'M2.5 10.5h4v3h-4z', 'M9.5 8.5h4v5h-4z'],
   matrix: ['M2.5 3.5h11v9h-11z', 'M2.5 7.5h11', 'M6.2 3.5v9', 'M9.8 3.5v9'],
+  gantt: ['M2.5 3.5h11v9h-11z', 'M2.5 6.5h11', 'M5 8.5h3', 'M7 11h4'],
   tasks: ['M2.5 4.5h11', 'M2.5 8h11', 'M2.5 11.5h7'],
   my: ['M2.6 8.3l2.7 2.7 8-8'],
   meetings: ['M2.5 4.5h11v9h-11z', 'M2.5 7.5h11', 'M5.5 2.5v3', 'M10.5 2.5v3'],

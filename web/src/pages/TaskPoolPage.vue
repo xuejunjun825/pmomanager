@@ -21,7 +21,16 @@ import { toApiError, type ApiError } from '@/api/http'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import type { SourceType, TaskStatus } from '@/types/enums'
-import type { MetaOptions, ProjectOptionRow, TaskDetail, TaskFilter, TaskRow, UserOption } from '@/types/api'
+import type {
+  MetaOptions,
+  ProjectOptionRow,
+  TaskDetail,
+  TaskFilter,
+  TaskRow,
+  ThemeOptionRow,
+  ThemeRef,
+  UserOption,
+} from '@/types/api'
 import { UNASSIGNED_VALUE } from '@/utils/projectOptions'
 
 const router = useRouter()
@@ -36,6 +45,8 @@ interface PoolQuery {
   source: SourceType | ''
   /** 项目筛选（DESIGN §3.7）：`'<id>'` | `'none'`（未指定项目）| `''`（全部），故按字符串存 */
   project: string
+  /** 主题筛选：`'<id>'` | `'none'`（未挂主题）| `''`（全部），URL 短键 theme */
+  theme: string
   meeting: number | ''
   overdue: boolean | ''
   q: string
@@ -47,6 +58,7 @@ const DEFAULTS: PoolQuery = {
   owner: '',
   source: '',
   project: '',
+  theme: '',
   meeting: '',
   overdue: '',
   q: '',
@@ -85,6 +97,12 @@ const sourceTypes = computed(() =>
 const projects = computed<ProjectOptionRow[]>(() =>
   Array.isArray(meta.value?.projects) ? meta.value!.projects : [],
 )
+/** 主题同样取 meta 全量（含已停用）：停用主题仍要能筛历史任务 */
+const themes = computed<ThemeOptionRow[]>(() =>
+  Array.isArray(meta.value?.themes) ? meta.value!.themes : [],
+)
+/** 行内改主题失败的行级文案：只活到下一次成功保存 */
+const themeErrors = ref<Record<number, string>>({})
 
 /** 筛选条与 URL 状态之间的唯一映射（URL 用短键，符合 DESIGN 的可分享形状） */
 const filters = computed<PoolFilters>(() => ({
@@ -92,6 +110,7 @@ const filters = computed<PoolFilters>(() => ({
   ownerId: state.value.owner,
   sourceType: state.value.source,
   project: state.value.project,
+  theme: state.value.theme,
   meetingId: state.value.meeting,
   overdue: state.value.overdue,
   keyword: state.value.q,
@@ -103,6 +122,7 @@ const hasFilters = computed(
     state.value.owner !== '' ||
     Boolean(state.value.source) ||
     Boolean(state.value.project) ||
+    Boolean(state.value.theme) ||
     state.value.meeting !== '' ||
     state.value.overdue !== '' ||
     state.value.q.trim() !== '',
@@ -115,6 +135,7 @@ function buildFilter(): TaskFilter {
     sourceType: state.value.source || undefined,
     // `'none'` 也原样下发：服务端把哨兵解释成「形态是项目型但无项目」（AC-5）
     project: state.value.project || undefined,
+    theme: state.value.theme || undefined,
     meetingId: state.value.meeting === '' ? undefined : state.value.meeting,
     overdue: state.value.overdue === '' ? undefined : state.value.overdue,
     keyword: state.value.q.trim() || undefined,
@@ -148,6 +169,12 @@ async function load(): Promise<void> {
     if (apiError.code === 'PROJECT_INVALID' && state.value.project) {
       state.value.project = ''
       toast.warning('项目筛选已失效，已按全部项目展示')
+      return
+    }
+    // 主题同理：`?theme=999` / 已删主题 → 400 THEME_INVALID，去掉条件重取
+    if (apiError.code === 'THEME_INVALID' && state.value.theme) {
+      state.value.theme = ''
+      toast.warning('主题筛选已失效，已按全部主题展示')
       return
     }
     error.value = apiError
@@ -188,6 +215,7 @@ function onFilters(next: PoolFilters): void {
   state.value.owner = next.ownerId
   state.value.source = next.sourceType
   state.value.project = next.project
+  state.value.theme = next.theme
   state.value.meeting = next.meetingId
   state.value.overdue = next.overdue
   state.value.q = next.keyword
@@ -199,6 +227,7 @@ function clearFilters(): void {
   state.value.owner = ''
   state.value.source = ''
   state.value.project = ''
+  state.value.theme = ''
   state.value.meeting = ''
   state.value.overdue = ''
   state.value.q = ''
@@ -209,6 +238,53 @@ function clearFilters(): void {
 function clearProjectFilter(): void {
   state.value.project = ''
   state.value.page = 1
+}
+
+/** 主题选项 → 行上快照（三色与停用态一并带上，页面不解析 hex） */
+function themeRefOf(value: string): ThemeRef | null {
+  if (value === '' || value === 'none') return null
+  const picked = themes.value.find((item) => String(item.id) === value)
+  if (!picked) return null
+  return {
+    id: picked.id,
+    name: picked.name,
+    color: picked.color,
+    softColor: picked.softColor,
+    borderColor: picked.borderColor,
+    enabled: picked.enabled,
+  }
+}
+
+/**
+ * 行内改主题（DESIGN §3.8）：先乐观更新这一行（不整表刷新），失败回滚并在单元格下留 12px 红字。
+ * 只由 ADMIN 触发（TaskTable 的 editableTheme 已收敛），服务端仍会再判一次权限。
+ */
+async function saveTheme(id: number, value: string): Promise<void> {
+  const row = items.value.find((item) => item.id === id)
+  if (!row) return
+  const previous = row.theme ?? null
+  const next = themeRefOf(value)
+  const cleaned = { ...themeErrors.value }
+  delete cleaned[id]
+  themeErrors.value = cleaned
+  items.value = items.value.map((item) => (item.id === id ? { ...item, theme: next } : item))
+  try {
+    const updated = await taskApi.update(id, {
+      themeId: value === '' || value === 'none' ? 0 : Number(value),
+    })
+    items.value = items.value.map((item) =>
+      item.id === id ? { ...item, theme: updated.theme ?? next } : item,
+    )
+    toast.success(next ? `已归入「${next.name}」` : '已移出主题')
+  } catch (caught) {
+    items.value = items.value.map((item) => (item.id === id ? { ...item, theme: previous } : item))
+    const apiError = toApiError(caught)
+    themeErrors.value = {
+      ...themeErrors.value,
+      [id]: apiError.message || '主题保存失败，请重试',
+    }
+    toast.error(apiError.message || '主题保存失败，请重试')
+  }
 }
 
 /** 项目筛选下为空时给专用空态（DESIGN §1.4），否则沿用通用文案 */
@@ -284,6 +360,7 @@ onBeforeUnmount(() => {
       :meetings="meetings"
       :source-types="sourceTypes"
       :projects="projects"
+      :themes="themes"
       :loading="loading"
       @update:model-value="onFilters"
     />
@@ -315,7 +392,11 @@ onBeforeUnmount(() => {
           :highlight-id="highlightId"
           :empty-title="emptyTitle"
           :empty-hint="emptyHint"
+          :themes="themes"
+          :editable-theme="canCreate"
+          :theme-errors="themeErrors"
           @row-click="openRow"
+          @theme-change="(row, value) => saveTheme(row.id, value)"
         >
           <template #empty>
             <EmptyState :title="emptyTitle" :description="emptyHint" size="sm">
@@ -357,6 +438,7 @@ onBeforeUnmount(() => {
       :meetings="meetings"
       :source-types="sourceTypes"
       :projects="projects"
+      :themes="themes"
       @close="drawerOpen = false"
       @saved="onCreated"
       @refresh-meta="loadMeta"

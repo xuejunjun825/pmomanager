@@ -19,16 +19,18 @@ import ErrorState from '@/components/ui/ErrorState.vue'
 import PageHeader from '@/components/ui/PageHeader.vue'
 import ProjectConfigTable from '@/components/settings/ProjectConfigTable.vue'
 import SourceTypeTable from '@/components/settings/SourceTypeTable.vue'
+import ThemeConfigTable from '@/components/settings/ThemeConfigTable.vue'
 import { projectsApi } from '@/api/projects'
 import { settingsApi } from '@/api/settings'
 import { sourceTypesApi } from '@/api/sourceTypes'
+import { themesApi } from '@/api/themes'
 import { usersApi } from '@/api/users'
 import { toApiError, type ApiError } from '@/api/http'
 import { useToast } from '@/composables/useToast'
 import { useAuthStore } from '@/stores/auth'
 import { formatDateTime } from '@/utils/format'
 import { ROLE_LABELS, type Role } from '@/types/enums'
-import type { ProjectRow, SourcePaletteEntry, SourceTypeRow, UserOption } from '@/types/api'
+import type { ProjectRow, SourcePaletteEntry, SourceTypeRow, ThemeRow, UserOption } from '@/types/api'
 
 interface Picked {
   id: number
@@ -82,6 +84,11 @@ const isAdmin = computed(() => auth.role === 'ADMIN')
 const projects = ref<ProjectRow[]>([])
 const projectsLoading = ref(false)
 const projectsError = ref('')
+
+/** 主题配置：与项目同权限（ADMIN）、同失败隔离（本卡错误 + 重试） */
+const themes = ref<ThemeRow[]>([])
+const themesLoading = ref(false)
+const themesError = ref<ApiError | null>(null)
 
 const leaveDialog = ref(false)
 let allowLeave = false
@@ -267,6 +274,23 @@ async function loadProjects(): Promise<void> {
   }
 }
 
+/** 主题配置：失败只影响本卡；非管理员不请求 */
+async function loadThemes(): Promise<void> {
+  if (!isAdmin.value) {
+    themesLoading.value = false
+    return
+  }
+  themesLoading.value = true
+  themesError.value = null
+  try {
+    themes.value = await themesApi.list()
+  } catch (e) {
+    themesError.value = toApiError(e)
+  } finally {
+    themesLoading.value = false
+  }
+}
+
 watch(dirty, (value) => {
   if (value) window.addEventListener('beforeunload', onBeforeUnload)
   else window.removeEventListener('beforeunload', onBeforeUnload)
@@ -277,6 +301,7 @@ onMounted(() => {
   void loadRoster()
   void loadSources()
   void loadProjects()
+  void loadThemes()
 })
 
 onBeforeUnmount(() => {
@@ -286,7 +311,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="settings">
-    <PageHeader title="系统设置" description="报表生效范围、来源类型与钉钉部署状态；配置改动即时留痕。">
+    <PageHeader title="系统设置" description="报表生效范围、来源类型、主题与钉钉部署状态；配置改动即时留痕。">
       <template #meta>
         <p v-if="updatedAt" class="settings__stamp">上次更新 {{ formatDateTime(updatedAt) }}</p>
       </template>
@@ -480,7 +505,25 @@ onBeforeUnmount(() => {
         />
       </section>
 
-      <!-- ⑤ 钉钉配置状态（只读） -->
+      <!-- ⑤ 主题配置（任务归类与甘特分组的主数据；仅管理员渲染整卡） -->
+      <section v-if="isAdmin" id="themes" class="card" aria-labelledby="themes-title">
+        <header class="card__head card__head--inline">
+          <div>
+            <h2 id="themes-title" class="card__title">主题配置</h2>
+            <p class="card__desc">
+              主题用于给任务归类并按「主题 → 项目」汇总到甘特视图；行内改动即时生效。
+            </p>
+          </div>
+        </header>
+        <ThemeConfigTable
+          :items="themes"
+          :loading="themesLoading"
+          :error="themesError"
+          @refresh="loadThemes"
+        />
+      </section>
+
+      <!-- ⑥ 钉钉配置状态（只读） -->
       <section class="card" aria-labelledby="dingtalk-title">
         <header class="card__head card__head--inline">
           <div>

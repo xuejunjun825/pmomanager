@@ -3,18 +3,21 @@
  * 会议列表（§4.6）。会议只归档不删除：归档后从默认视图隐藏，但其下任务与来源快照不受影响（AC-5）。
  * 接口的 archived 是精确过滤而非「包含已归档」，所以开关切换的是「未归档视图 / 已归档视图」。
  */
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import PageHeader from '@/components/ui/PageHeader.vue'
 import AppButton from '@/components/ui/AppButton.vue'
 import AppInput from '@/components/ui/AppInput.vue'
 import AppDatePicker from '@/components/ui/AppDatePicker.vue'
+import AppSelect from '@/components/ui/AppSelect.vue'
+import AppSearchSelect from '@/components/ui/AppSearchSelect.vue'
 import AppTextarea from '@/components/ui/AppTextarea.vue'
 import AppBadge from '@/components/ui/AppBadge.vue'
 import DataTable from '@/components/ui/DataTable.vue'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 import Modal from '@/components/ui/Modal.vue'
 import Pagination from '@/components/ui/Pagination.vue'
+import UserMultiSelect from '@/components/ui/UserMultiSelect.vue'
 import ErrorState from '@/components/ui/ErrorState.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import { useQuerySync, type QueryKinds } from '@/composables/useQuerySync'
@@ -66,19 +69,62 @@ const archiving = ref(false)
 
 /* ------------------------------------------------------------ 新建会议 */
 
+/** 建会时的一行决议草稿：ownerId 用字符串以贴合 AppSelect 的 modelValue 形态 */
+interface DecisionDraft {
+  key: number
+  description: string
+  ownerId: string
+  dueDate: string
+}
+
+let draftSeq = 0
+
 const creating = ref(false)
 const saving = ref(false)
 const formError = ref('')
 const fieldErrors = ref<Record<string, string>>({})
 const form = ref({ title: '', meetingDate: '', host: '', note: '', attendeeIds: [] as number[] })
+const decisions = ref<DecisionDraft[]>([])
+/** 决议行错误键：`items:{行号}:{字段}`，避免与顶层字段同名互撞 */
+const itemErrorKeys = computed(() => Object.keys(fieldErrors.value).filter((key) => key.startsWith('items:')))
 
 const activeOwners = computed(() => owners.value.filter((user) => user.status === 'ACTIVE'))
+
+/** 主持人仍是「姓名文本」（DB 零迁移），选项与可选项同源：启用用户的姓名 */
+const hostOptions = computed(() => activeOwners.value.map((user) => ({ label: user.name, value: user.name })))
+
+const ownerOptions = computed(() => activeOwners.value.map((user) => ({ label: user.name, value: String(user.id) })))
 
 function openCreate(): void {
   form.value = { title: '', meetingDate: '', host: '', note: '', attendeeIds: [] }
   fieldErrors.value = {}
   formError.value = ''
+  decisions.value = [newDecision()]
   creating.value = true
+}
+
+function newDecision(): DecisionDraft {
+  draftSeq += 1
+  return { key: draftSeq, description: '', ownerId: '', dueDate: '' }
+}
+
+function addDecision(): void {
+  decisions.value.push(newDecision())
+}
+
+function removeDecision(index: number): void {
+  decisions.value.splice(index, 1)
+}
+
+/**
+ * 选中主持人后把它同时带进参会人（只加一次、已在列表不重复）。
+ * 只在「选中系统用户」这一动作发生时触发；用户之后手动移除参会人，不会被悄悄加回来。
+ */
+function onHostChange(value: string): void {
+  const name = value.trim()
+  form.value.host = value
+  const matched = activeOwners.value.find((user) => user.name === name)
+  if (matched && !form.value.attendeeIds.includes(matched.id)) form.value.attendeeIds.push(matched.id)
 }
 
 function closeCreate(): void {
@@ -86,22 +132,54 @@ function closeCreate(): void {
   creating.value = false
 }
 
-function toggleAttendee(id: number): void {
-  const list = form.value.attendeeIds
-  const index = list.indexOf(id)
-  if (index >= 0) list.splice(index, 1)
-  else list.push(id)
+function itemError(index: number, field: string): string {
+  return fieldErrors.value[`items:${index}:${field}`] ?? ''
+}
+
+/** 整行级提示（DESIGN §3.4：「第 2 行：截止日期不能为空」） */
+function rowError(index: number): string {
+  for (const field of ['row', 'description', 'ownerId', 'dueDate']) {
+    const message = itemError(index, field)
+    if (message) return `第 ${index + 1} 行：${message}`
+  }
+  return ''
+}
+
+/** 一行都没填的空行不提交：用户只是点了「添加」又没写，不该被后端当成缺描述 */
+function isBlankDecision(row: DecisionDraft): boolean {
+  return !row.description.trim() && !row.ownerId && !row.dueDate
+}
+
+async function focusFirstError(): Promise<void> {
+  const first = itemErrorKeys.value[0]
+  await nextTick()
+  const host = first ? document.querySelector<HTMLElement>(`[data-cell="${first}"]`) : null
+  const target = host?.querySelector<HTMLElement>('input, textarea, select') ?? null
+  if (target) {
+    target.focus()
+    return
+  }
+  const top = document.querySelector<HTMLElement>('[data-create-error]')
+  top?.focus()
 }
 
 async function submitCreate(): Promise<void> {
   fieldErrors.value = {}
   formError.value = ''
+  const items = decisions.value
+    .filter((row) => !isBlankDecision(row))
+    .map((row) => ({
+      description: row.description.trim(),
+      ownerId: row.ownerId ? Number(row.ownerId) : null,
+      dueDate: row.dueDate,
+    }))
   const payload = {
     title: form.value.title.trim(),
     meetingDate: form.value.meetingDate,
     host: form.value.host.trim(),
     note: form.value.note.trim() || undefined,
     attendeeIds: [...form.value.attendeeIds],
+    items: items.length ? items : undefined,
   }
   const local: Record<string, string> = {}
   if (!payload.title) local.title = '请填写会议标题'
@@ -109,31 +187,49 @@ async function submitCreate(): Promise<void> {
   if (!payload.host) local.host = '请填写主持人'
   if (Object.keys(local).length) {
     fieldErrors.value = local
+    void focusFirstError()
     return
   }
   saving.value = true
   try {
     const created = await meetingApi.create(payload)
-    toast.success('会议已创建，可以开始录入决议事项')
+    toast.success(
+      items.length ? `会议已创建，并录入 ${items.length} 条决议事项` : '会议已创建，可以开始录入决议事项',
+    )
     creating.value = false
     void router.push(`/meetings/${created.id}`)
   } catch (err) {
     const apiError = toApiError(err)
     applyFieldErrors(apiError)
+    void focusFirstError()
   } finally {
     saving.value = false
   }
 }
 
-/** 422 的 fieldErrors 逐字段回填，未匹配到的落到顶部提示 */
+/**
+ * 422 的 fieldErrors 逐字段回填，未匹配到的落到顶部提示。
+ * 决议行错误形如 `items[2].dueDate`（K 从 1 起），折算成 0 起的行下标后落到行内单元格。
+ */
 function applyFieldErrors(apiError: ApiError): void {
   const next: Record<string, string> = {}
   for (const field of apiError.fieldErrors ?? []) {
-    if (!next[field.field]) next[field.field] = field.message
+    const key = itemErrorKey(field.field, field.index)
+    if (!next[key]) next[key] = field.message
   }
   fieldErrors.value = next
   const unmatched = Object.keys(next).length === 0
   formError.value = unmatched ? apiError.message : ''
+}
+
+function itemErrorKey(field: string, index?: number): string {
+  const matched = /^items\[(\d+)\]\.(.+)$/.exec(field)
+  if (matched) return `items:${Number(matched[1]) - 1}:${matched[2]}`
+  // 整行级错误（后端 `items[K]` 不带字段）：落到 row 键，由 rowError 优先展示
+  const rowOnly = /^items\[(\d+)\]$/.exec(field)
+  if (rowOnly) return `items:${Number(rowOnly[1]) - 1}:row`
+  if (typeof index === 'number') return `items:${index}:${field}`
+  return field
 }
 
 async function load(): Promise<void> {
@@ -338,7 +434,14 @@ function closeBadge(row: MeetingRow): { text: string; tone: BadgeTone } {
       @close="archiveTarget = null"
     />
 
-    <Modal :open="creating" title="新建会议" description="会议信息是决议事项的来源快照。" size="md" @close="closeCreate">
+    <Modal
+      :open="creating"
+      title="新建会议"
+      description="会议信息是决议事项的来源快照；决议事项可以现在录，也可以之后在详情页补。"
+      size="lg"
+      :close-on-overlay="!saving"
+      @close="closeCreate"
+    >
       <form class="form" @submit.prevent="submitCreate">
         <AppInput
           v-model="form.title"
@@ -356,31 +459,101 @@ function closeBadge(row: MeetingRow): { text: string; tone: BadgeTone } {
             :invalid="!!fieldErrors.meetingDate"
             :error="fieldErrors.meetingDate"
           />
-          <AppInput
-            v-model="form.host"
+          <AppSearchSelect
+            :model-value="form.host"
+            :options="hostOptions"
             label="主持人"
-            placeholder="例如：张伟"
+            placeholder="搜索或输入姓名"
+            allow-custom
             required
             :invalid="!!fieldErrors.host"
             :error="fieldErrors.host"
+            hint="不在系统里的人也能填，仅记录姓名，不参与提醒与权限"
+            @update:model-value="form.host = $event"
+            @change="onHostChange"
           />
         </div>
         <fieldset class="attendees">
           <legend class="attendees__legend">参会人</legend>
-          <div class="attendees__list">
-            <label v-for="user in activeOwners" :key="user.id" class="attendees__item">
-              <input
-                type="checkbox"
-                :checked="form.attendeeIds.includes(user.id)"
-                @change="toggleAttendee(user.id)"
-              />
-              <span>{{ user.name }}</span>
-            </label>
-            <p v-if="!activeOwners.length" class="attendees__empty">暂无可选用户</p>
-          </div>
+          <UserMultiSelect
+            v-model="form.attendeeIds"
+            :options="owners"
+            placeholder="搜索并添加参会人"
+            :invalid="!!fieldErrors.attendeeIds"
+            :error="fieldErrors.attendeeIds"
+          />
+          <p class="form__hint">{{ activeOwners.length }} 位可选用户；选中主持人会自动带入一次</p>
         </fieldset>
+
+        <section class="items">
+          <header class="items__head">
+            <div>
+              <h3 class="items__title">决议事项（可留空）</h3>
+              <p class="items__hint">每条决议会在转任务时生成一条任务；留空则稍后在会议详情里逐条录入。</p>
+            </div>
+            <AppButton variant="secondary" size="compact" type="button" @click="addDecision">+ 添加一条</AppButton>
+          </header>
+
+          <div v-if="!decisions.length" class="items__empty">本次会议暂不录入决议事项。</div>
+
+          <article
+            v-for="(row, index) in decisions"
+            :key="row.key"
+            class="item"
+            :class="{ 'item--invalid': !!rowError(index) }"
+          >
+            <header class="item__head">
+              <span class="item__no num">#{{ index + 1 }}</span>
+              <button
+                type="button"
+                class="item__remove"
+                :aria-label="`移除第 ${index + 1} 行决议`"
+                @click="removeDecision(index)"
+              >
+                <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
+                  <path d="M4 4l8 8M12 4l-8 8" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+                </svg>
+              </button>
+            </header>
+            <div :data-cell="`items:${index}:description`">
+              <AppInput
+                v-model="row.description"
+                label="决议描述"
+                placeholder="例如：下周完成灰度发布方案"
+                required
+                :maxlength="100"
+                :invalid="!!itemError(index, 'description')"
+                :error="itemError(index, 'description')"
+              />
+            </div>
+            <div class="item__row">
+              <div :data-cell="`items:${index}:ownerId`">
+                <AppSelect
+                  v-model="row.ownerId"
+                  label="负责人"
+                  placeholder="选择负责人"
+                  :options="ownerOptions"
+                  required
+                  :invalid="!!itemError(index, 'ownerId')"
+                  :error="itemError(index, 'ownerId')"
+                />
+              </div>
+              <div :data-cell="`items:${index}:dueDate`">
+                <AppDatePicker
+                  v-model="row.dueDate"
+                  label="截止日期"
+                  required
+                  :invalid="!!itemError(index, 'dueDate')"
+                  :error="itemError(index, 'dueDate')"
+                />
+              </div>
+            </div>
+            <p v-if="rowError(index)" class="item__error" role="alert">{{ rowError(index) }}</p>
+          </article>
+        </section>
+
         <AppTextarea v-model="form.note" label="会议备注" :rows="2" :maxlength="200" placeholder="可选" />
-        <p v-if="formError" class="form__error" role="alert">{{ formError }}</p>
+        <p v-if="formError" class="form__error" role="alert" tabindex="-1" data-create-error>{{ formError }}</p>
         <div class="form__foot">
           <AppButton variant="secondary" :disabled="saving" @click="closeCreate">取消</AppButton>
           <AppButton type="submit" :loading="saving" loading-text="创建中">创建会议</AppButton>
@@ -505,25 +678,110 @@ function closeBadge(row: MeetingRow): { text: string; tone: BadgeTone } {
   color: var(--c-ink-700);
   margin-bottom: var(--sp-2);
 }
-.attendees__list {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: var(--sp-2) var(--sp-3);
-  max-height: 140px;
-  overflow-y: auto;
-  padding: var(--sp-2) 0;
-}
-.attendees__item {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--sp-2);
-  font-size: var(--fs-body-sm);
-  color: var(--c-ink-700);
-  cursor: pointer;
-}
 .attendees__empty {
   margin: 0;
   font-size: var(--fs-caption);
   color: var(--c-ink-500);
+}
+.form__hint {
+  margin: var(--sp-2) 0 0;
+  font-size: var(--fs-caption);
+  color: var(--c-ink-500);
+}
+.form__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+/* -------------------------------------------------- 决议事项子卡（DESIGN §3.4） */
+.items {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-4);
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-md);
+  background: var(--c-bg);
+}
+.items__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+.items__title {
+  margin: 0;
+  font-size: var(--fs-body-sm);
+  font-weight: 600;
+  color: var(--c-ink-800);
+}
+.items__hint {
+  margin: var(--sp-1) 0 0;
+  font-size: var(--fs-caption);
+  color: var(--c-ink-500);
+}
+.items__empty {
+  padding: var(--sp-3) 0;
+  font-size: var(--fs-body-sm);
+  color: var(--c-ink-400);
+}
+.item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-3);
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-md);
+  background: var(--c-surface);
+}
+/* 行内出错：整卡加红边，配合字段红框，一眼看出是哪一行 */
+.item--invalid {
+  border-color: var(--c-danger-border);
+}
+.item__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.item__no {
+  font-size: var(--fs-caption);
+  font-weight: 600;
+  color: var(--c-ink-400);
+}
+.item__remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--c-ink-400);
+  cursor: pointer;
+}
+.item__remove:hover {
+  background: var(--c-danger-soft);
+  color: var(--c-danger-text);
+}
+.item__remove:focus-visible {
+  outline: 2px solid var(--c-primary);
+  outline-offset: 1px;
+}
+.item__row {
+  display: grid;
+  grid-template-columns: 220px 176px;
+  gap: var(--sp-3);
+}
+.item__error {
+  margin: 0;
+  font-size: var(--fs-caption);
+  color: var(--c-danger-text);
+}
+@media (max-width: 640px) {
+  .item__row {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

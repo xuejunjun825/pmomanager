@@ -10,11 +10,14 @@ import OverduePill from '@/components/ui/OverduePill.vue'
 import OwnerChip from '@/components/ui/OwnerChip.vue'
 import SourceTag from '@/components/ui/SourceTag.vue'
 import ProjectTag from '@/components/ui/ProjectTag.vue'
+import ThemeTag from '@/components/ui/ThemeTag.vue'
+import AppSelect from '@/components/ui/AppSelect.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import { formatDate, formatDateTime } from '@/utils/format'
 import { isFinishedStatus } from '@/types/enums'
-import { projectView } from '@/utils/projectOptions'
-import type { TaskRow } from '@/types/api'
+import { UNASSIGNED_VALUE, projectView } from '@/utils/projectOptions'
+import { themeOptions as buildThemeOptions, themeView } from '@/utils/themeOptions'
+import type { TaskRow, ThemeOptionRow } from '@/types/api'
 
 const props = withDefaults(
   defineProps<{
@@ -24,22 +27,57 @@ const props = withDefaults(
     highlightId?: number | null
     emptyTitle?: string
     emptyHint?: string
+    /** meta.themes 全量（含已停用）：行内改主题的选项来源 */
+    themes?: ThemeOptionRow[]
+    /** 仅 ADMIN 可行内改主题；OWNER/EXEC 只看标签（AC-8） */
+    editableTheme?: boolean
+    /** 行内保存失败的行级文案：key=任务 id，失败回滚后仍显示在单元格下方 */
+    themeErrors?: Record<number, string>
   }>(),
-  { loading: false, highlightId: null, emptyTitle: '没有符合条件的任务', emptyHint: '调整筛选条件后再试' },
+  {
+    loading: false,
+    highlightId: null,
+    emptyTitle: '没有符合条件的任务',
+    emptyHint: '调整筛选条件后再试',
+    themes: () => [],
+    editableTheme: false,
+    themeErrors: () => ({}),
+  },
 )
 
-defineEmits<{ 'row-click': [row: TaskRow, index: number] }>()
+const emit = defineEmits<{
+  'row-click': [row: TaskRow, index: number]
+  'theme-change': [row: TaskRow, value: string]
+}>()
 
 const columns: TableColumn[] = [
   { key: 'title', label: '标题', width: '200px' },
   { key: 'owner', label: '负责人', width: '104px' },
   { key: 'dueDate', label: '截止日期', width: '128px' },
   { key: 'source', label: '来源', width: '150px' },
+  { key: 'theme', label: '主题', width: '96px' },
   { key: 'status', label: '状态', width: '88px' },
   { key: 'overdue', label: '逾期', width: '96px' },
   { key: 'urgeCount', label: '催办', width: '64px', numeric: true },
   { key: 'updatedAt', label: '最近更新', width: '110px' },
 ]
+
+/** 行内主题选项：停用项保留在列表里（当前值可能就是停用项），未挂主题用 none 哨兵 */
+const themeItems = computed(() =>
+  buildThemeOptions(props.themes, {
+    allOption: false,
+    includeDisabled: true,
+    includeUnassigned: true,
+  }),
+)
+
+function themeValue(row: TaskRow): string {
+  return row.theme?.id != null ? String(row.theme.id) : UNASSIGNED_VALUE
+}
+
+function themeProps(row: TaskRow) {
+  return themeView(row.theme)
+}
 
 const rows = computed<TaskRow[]>(() => (Array.isArray(props.items) ? props.items : []))
 /** DataTable 的泛型约束是 Record<string, unknown>，接口类型过不去；只在这一处降级，插槽里立刻收窄 */
@@ -123,6 +161,26 @@ function isHighlighted(row: TaskRow): boolean {
           :class="{ 'is-finished': finished(asTask(row)) }"
         >
           {{ sourceText(asTask(row)) }}
+        </span>
+      </span>
+    </template>
+
+    <template #cell-theme="{ row }">
+      <!-- 单元格整体阻断冒泡：行内改主题不能顺手把用户带进详情页 -->
+      <span class="cell-theme" @click.stop @mousedown.stop>
+        <AppSelect
+          v-if="editableTheme"
+          class="cell-theme__select"
+          :model-value="themeValue(asTask(row))"
+          :options="themeItems"
+          size="compact"
+          :aria-label="`主题：${asTask(row).title}`"
+          :invalid="Boolean(themeErrors[asTask(row).id])"
+          @update:model-value="emit('theme-change', asTask(row), $event)"
+        />
+        <ThemeTag v-else v-bind="themeProps(asTask(row))" />
+        <span v-if="themeErrors[asTask(row).id]" class="cell-theme__error" role="alert">
+          {{ themeErrors[asTask(row).id] }}
         </span>
       </span>
     </template>
@@ -226,5 +284,21 @@ function isHighlighted(row: TaskRow): boolean {
 }
 .cell-dash {
   color: var(--c-ink-400);
+}
+/* 主题列：只读给标签，ADMIN 给行内下拉；失败时行高从 48 长到 64 放 12px 红字（不整页刷新） */
+.cell-theme {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+}
+.cell-theme__select {
+  width: 100%;
+}
+.cell-theme__error {
+  font-size: var(--fs-micro);
+  line-height: var(--lh-micro);
+  color: var(--c-danger-text);
 }
 </style>

@@ -32,8 +32,26 @@ public record UpdateTaskRequest(
         Long sourceDecisionItemId,
 
         /** 改来源同样非法：出现即 TASK_SOURCE_IMMUTABLE（含把项目加/换到已建任务上）。 */
-        Long sourceProjectId) {
+        Long sourceProjectId,
 
+        /** 主题（r7）：{@code null} = 不改，{@code 0} = 清空（未归主题），其它 = 改为该主题。 */
+        Long themeId,
+
+        /** 计划开始（r7）：{@code null} = 不改；非空时必须 ≤ 当前截止日期。 */
+        LocalDate plannedStartDate,
+
+        /** 清空计划开始：日期控件没有 0 语义，用显式布尔避免空字符串解析歧义。 */
+        boolean clearPlannedStart) {
+
+    /** 兼容 r7 之前的调用方：主题不改、计划开始不改。 */
+    public UpdateTaskRequest(String title, Long ownerId, LocalDate dueDate, Priority priority,
+                             String sourceNote, String sourceType, Long sourceMeetingId,
+                             Long sourceDecisionItemId, Long sourceProjectId) {
+        this(title, ownerId, dueDate, priority, sourceNote, sourceType, sourceMeetingId,
+                sourceDecisionItemId, sourceProjectId, null, null, false);
+    }
+
+    /** 来源字段判定不包含 r7 的主题/计划开始：那两个是「可编辑字段」，不是来源。 */
     public boolean hasSourceFields() {
         return sourceType != null || sourceMeetingId != null || sourceDecisionItemId != null
                 || sourceProjectId != null;

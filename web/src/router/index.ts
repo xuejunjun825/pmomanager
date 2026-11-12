@@ -67,6 +67,12 @@ export const routes: RouteRecordRaw[] = [
     meta: { title: '闭环矩阵', section: '工作台', roles: ['ADMIN', 'EXEC'] },
   },
   {
+    path: '/gantt',
+    name: 'gantt',
+    component: page('GanttPage'),
+    meta: { title: '进度甘特', section: '工作台', roles: ['ADMIN', 'EXEC'] },
+  },
+  {
     path: '/tasks',
     name: 'tasks',
     component: page('TaskPoolPage'),

@@ -40,7 +40,10 @@ public final class TaskRowMapper {
                 rs.getLong("urge_count"),
                 rs.getObject("last_urged_at", LocalDateTime.class),
                 rs.getObject("updated_at", LocalDateTime.class),
-                rs.getObject("completed_at", LocalDateTime.class));
+                rs.getObject("completed_at", LocalDateTime.class),
+                theme(rs),
+                rs.getObject("planned_start_date", java.time.LocalDate.class),
+                rs.getBoolean("at_risk"));
     }
 
     public static TaskDetailRow mapDetail(ResultSet rs) throws SQLException {
@@ -60,6 +63,9 @@ public final class TaskRowMapper {
                 rs.getObject("last_urged_at", LocalDateTime.class),
                 rs.getObject("updated_at", LocalDateTime.class),
                 rs.getObject("completed_at", LocalDateTime.class),
+                theme(rs),
+                rs.getObject("planned_start_date", java.time.LocalDate.class),
+                rs.getBoolean("at_risk"),
                 dispatcher(rs),
                 Priority.of(rs.getString("priority")),
                 rs.getString("completion_note"),
@@ -87,6 +93,40 @@ public final class TaskRowMapper {
             // 读模型容错
         }
         return new UserRef(rs.getLong("dispatcher_id"), rs.getString("dispatcher_name"), role);
+    }
+
+    /**
+     * 主题快照（r7）：三色由 themes.color 经 SourcePalette 派生，与 source 同一套色板。
+     * 未归主题 → null（前端渲染「未归主题」）；主题被删/未 join → 也只丢三色，不报错。
+     */
+    private static com.pmo.supervise.task.dto.ThemeRef theme(ResultSet rs) throws SQLException {
+        Long themeId;
+        try {
+            themeId = rs.getObject("theme_id", Long.class);
+        } catch (SQLException missingColumn) {
+            return null;
+        }
+        if (themeId == null) {
+            return null;
+        }
+        String name = null;
+        String colorHex = null;
+        boolean enabled = true;
+        try {
+            name = rs.getString("theme_name");
+            colorHex = rs.getString("theme_color");
+            enabled = !Boolean.FALSE.equals(rs.getObject("theme_enabled", Boolean.class));
+        } catch (SQLException ignored) {
+            // 局部查询未 join themes：只丢名字/颜色，主题 id 仍可用
+        }
+        SourcePalette.Triple triple = SourcePalette.of(colorHex);
+        return new com.pmo.supervise.task.dto.ThemeRef(
+                themeId,
+                name == null || name.isBlank() ? "未知主题（" + themeId + "）" : name,
+                triple.color(),
+                triple.soft(),
+                triple.border(),
+                enabled);
     }
 
     private static TaskSource source(ResultSet rs) throws SQLException {

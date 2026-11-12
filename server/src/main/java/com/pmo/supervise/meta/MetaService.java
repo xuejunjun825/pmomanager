@@ -12,6 +12,7 @@ import com.pmo.supervise.meta.dto.MetaOptions.OwnerOption;
 import com.pmo.supervise.project.ProjectService;
 import com.pmo.supervise.source.SourceTypeService;
 import com.pmo.supervise.source.dto.SourceTypeOption;
+import com.pmo.supervise.theme.ThemeService;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -31,11 +32,14 @@ public class MetaService {
     private final JdbcTemplate jdbc;
     private final SourceTypeService sourceTypes;
     private final ProjectService projects;
+    private final ThemeService themes;
 
-    public MetaService(JdbcTemplate jdbc, SourceTypeService sourceTypes, ProjectService projects) {
+    public MetaService(JdbcTemplate jdbc, SourceTypeService sourceTypes, ProjectService projects,
+                       ThemeService themes) {
         this.jdbc = jdbc;
         this.sourceTypes = sourceTypes;
         this.projects = projects;
+        this.themes = themes;
     }
 
     @Transactional(readOnly = true)
@@ -75,6 +79,8 @@ public class MetaService {
                 sourceTypes.options(),
                 // 项目不是权限维度：全员同一份（含停用，前端投影决定后缀与可选项，AC-8）。
                 projects.options(),
+                // 主题同项目：全员可读、含停用；选项不带 usageCount，避免 meta 做 count 子查询（AC-8）。
+                themes.options(),
                 Arrays.stream(TaskStatus.values()).map(v -> new Option<>(v, v.label())).toList(),
                 Arrays.stream(Priority.values()).map(v -> new Option<>(v, v.label())).toList());
     }

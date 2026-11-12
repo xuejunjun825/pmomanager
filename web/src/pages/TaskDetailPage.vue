@@ -13,8 +13,10 @@ import StatusBadge from '@/components/ui/StatusBadge.vue'
 import OverduePill from '@/components/ui/OverduePill.vue'
 import SourceTag from '@/components/ui/SourceTag.vue'
 import ProjectTag from '@/components/ui/ProjectTag.vue'
+import ThemeTag from '@/components/ui/ThemeTag.vue'
 import ErrorState from '@/components/ui/ErrorState.vue'
 import TaskActions from '@/components/task/TaskActions.vue'
+import TaskStatusFlow from '@/components/task/TaskStatusFlow.vue'
 import UrgeButton from '@/components/task/UrgeButton.vue'
 import TaskFormDrawer from '@/components/task/TaskFormDrawer.vue'
 import ProgressComposer from '@/components/task/ProgressComposer.vue'
@@ -24,9 +26,9 @@ import { metaApi } from '@/api/meta'
 import { toApiError, type ApiError } from '@/api/http'
 import { useAuthStore } from '@/stores/auth'
 import { formatDate, formatDateTime, formatUrgeSummary } from '@/utils/format'
-import { PRIORITY_LABELS, TASK_STATUS_LABELS } from '@/types/enums'
+import { PRIORITY_LABELS } from '@/types/enums'
 import { DISABLED_SUFFIX, projectView } from '@/utils/projectOptions'
-import type { TaskStatus } from '@/types/enums'
+import { themeView } from '@/utils/themeOptions'
 import type { MetaOptions, ProgressRow, TaskDetail, UrgeResult, UserOption } from '@/types/api'
 
 const route = useRoute()
@@ -134,28 +136,29 @@ function onProgressCreated(row: ProgressRow): void {
   void nextTick(() => locateAnchor())
 }
 
-const STEPS: TaskStatus[] = ['PENDING', 'IN_PROGRESS', 'PENDING_ACCEPT', 'DONE']
-
-const stepIndex = computed(() => {
-  if (!detail.value) return -1
-  return STEPS.indexOf(detail.value.status)
-})
-
 const cancelled = computed(() => detail.value?.status === 'CANCELLED')
+
+/** 任务行自带的主题快照；未挂主题时 unspecified=true，来源区不渲染标签 */
+const themeInfo = computed(() => themeView(detail.value?.theme))
+
+/** 计划行只在填了计划开始或已逾期时出现（无数据不占位） */
+const planText = computed(() => {
+  const task = detail.value
+  if (!task) return ''
+  if (task.plannedStartDate) {
+    return `计划：${formatDate(task.plannedStartDate)} → ${formatDate(task.dueDate)}`
+  }
+  if (task.isOverdue) {
+    return `计划：未填写（甘特按创建日推算） · 截止 ${formatDate(task.dueDate)}`
+  }
+  return ''
+})
 
 const urgeSummary = computed(() => {
   const task = detail.value
   if (!task) return '还没有催办'
   return formatUrgeSummary(task.urgeCount ?? 0, task.lastUrgedAt ?? null)
 })
-
-function stepState(index: number): 'done' | 'current' | 'future' {
-  if (detail.value?.status === 'DONE') return 'done'
-  if (stepIndex.value < 0) return index === 0 ? 'current' : 'future'
-  if (index < stepIndex.value) return 'done'
-  if (index === stepIndex.value) return 'current'
-  return 'future'
-}
 
 async function load(): Promise<void> {
   if (!Number.isFinite(taskId.value) || taskId.value <= 0) {
@@ -304,25 +307,17 @@ onMounted(() => {
 
       <div class="grid">
         <div class="main">
-          <!-- ① 状态步进 -->
+          <!-- ① 状态步进：五步闭环条（DESIGN §3.6），只描述下一步，不渲染按钮 -->
           <section class="panel">
             <h2 class="panel__title">进度</h2>
-            <p v-if="cancelled" class="cancelled">
-              任务已取消<span v-if="detail.completedAt"> · {{ formatDateTime(detail.completedAt) }}</span>
+            <TaskStatusFlow
+              :status="detail.status"
+              :owner-name="detail.owner?.name"
+              :dispatcher-name="detail.dispatcher?.name"
+            />
+            <p v-if="cancelled && detail.completedAt" class="cancelled">
+              取消时间 {{ formatDateTime(detail.completedAt) }}
             </p>
-            <ol v-else class="steps">
-              <li
-                v-for="(step, index) in STEPS"
-                :key="step"
-                class="steps__item"
-                :class="`is-${stepState(index)}`"
-              >
-                <span class="steps__dot" aria-hidden="true">
-                  <span v-if="stepState(index) === 'done'" class="steps__check">✓</span>
-                </span>
-                <span class="steps__label">{{ TASK_STATUS_LABELS[step] }}</span>
-              </li>
-            </ol>
           </section>
 
           <!-- ② 来源 -->
@@ -350,12 +345,21 @@ onMounted(() => {
                   {{ sourceProjectName }}<span v-if="sourceProject && !sourceProject.enabled">{{ DISABLED_SUFFIX }}</span>
                 </RouterLink>
                 <ProjectTag v-else-if="sourceProject?.unspecified" unspecified />
+                <!-- 主题位：未挂主题不渲染（不产生空标签）；三色来自任务行快照 -->
+                <ThemeTag
+                  v-if="!themeInfo.unspecified"
+                  :name="themeInfo.name"
+                  :color="themeInfo.color"
+                  :soft-color="themeInfo.softColor"
+                  :border-color="themeInfo.borderColor"
+                  :enabled="themeInfo.enabled"
+                />
               </div>
               <!-- 形态以「是否绑定会议」为准，不按来源编码判断：自定义会议型来源同样渲染（D-01 / AC-5） -->
               <template v-if="detail.source?.meetingId != null">
                 <p class="source__meeting">
                   <RouterLink
-                    v-if="detail.source.meetingId"
+                    v-if="auth.role === 'ADMIN'"
                     :to="`/meetings/${detail.source.meetingId}`"
                     class="source__link"
                   >
@@ -363,12 +367,14 @@ onMounted(() => {
                   </RouterLink>
                   <span v-else>{{ detail.source.meetingTitle || '会议' }}</span>
                 </p>
+                <p v-if="auth.role !== 'ADMIN'" class="source__hint">仅管理员可查看会议</p>
                 <blockquote v-if="detail.source.note" class="source__note">
                   {{ detail.source.note }}
                 </blockquote>
               </template>
               <p v-else class="source__note">{{ detail.source?.note || '没有填写来源说明' }}</p>
               <p class="source__tip">来源是创建时的快照，会议后续改动不会影响这条任务。</p>
+              <p v-if="planText" class="source__plan">{{ planText }}</p>
             </div>
           </section>
 
@@ -593,54 +599,7 @@ onMounted(() => {
   text-transform: uppercase;
   color: var(--c-ink-500);
 }
-.steps {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-6);
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.steps__item {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  font-size: var(--fs-body-sm);
-  color: var(--c-ink-400);
-}
-.steps__dot {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  border: 1px solid var(--c-line);
-  background: var(--c-surface);
-  font-size: 8px;
-  line-height: 1;
-}
-.steps__item.is-current {
-  color: var(--c-primary);
-  font-weight: 600;
-}
-.steps__item.is-current .steps__dot {
-  border-color: var(--c-primary);
-  background: var(--c-primary);
-  box-shadow: 0 0 0 3px var(--c-primary-soft);
-}
-.steps__item.is-done {
-  color: var(--c-ink-700);
-}
-.steps__item.is-done .steps__dot {
-  border-color: var(--c-success);
-  background: var(--c-success);
-  color: #fff;
-}
-.steps__check {
-  color: #fff;
-  font-size: 8px;
-}
+/* 五步闭环条的样式收在 TaskStatusFlow 内（含 ≤640 竖排），本页不再保留第二套 .steps */
 .cancelled {
   margin: 0;
   font-size: var(--fs-body-sm);
@@ -704,6 +663,17 @@ onMounted(() => {
   margin: 0;
   font-size: var(--fs-caption);
   color: var(--c-ink-400);
+}
+.source__hint {
+  margin: 0;
+  font-size: var(--fs-micro);
+  color: var(--c-ink-400);
+}
+.source__plan {
+  margin: 0;
+  font-size: var(--fs-micro);
+  color: var(--c-ink-500);
+  font-variant-numeric: tabular-nums;
 }
 .delivery {
   display: flex;

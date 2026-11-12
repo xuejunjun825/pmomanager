@@ -21,4 +21,15 @@ public final class TaskSql {
 
     public static final String DUE_SOON =
             "(" + NOT_FINISHED + " AND t.due_date = :tomorrow)";
+
+    /**
+     * 风险 = 逾期未完成 ∪ 待验收已满 {@link TaskRiskSpec#PENDING_ACCEPT_DAYS} 天（r7 / AC-7）。
+     * 天数只引用常量，SQL 与 Java 判定不会各写一个 3；只复用既有 :today，不新增命名参数，
+     * 因此所有走 {@code TaskQueryDao.selectBase()} 的查询无需改参数注入。
+     */
+    public static final String AT_RISK =
+            "(" + OVERDUE
+            + " OR (t.status = 'PENDING_ACCEPT' AND t.submitted_at IS NOT NULL"
+            + " AND DATE(t.submitted_at) <= DATE_SUB(:today, INTERVAL "
+            + TaskRiskSpec.PENDING_ACCEPT_DAYS + " DAY)))";
 }

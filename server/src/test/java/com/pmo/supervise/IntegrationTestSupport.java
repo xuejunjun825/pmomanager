@@ -37,6 +37,9 @@ public abstract class IntegrationTestSupport {
         jdbc.execute("DELETE FROM urge_records");
         jdbc.execute("DELETE FROM task_events");
         jdbc.execute("DELETE FROM tasks");
+        // themes 被 tasks.theme_id 引用（fk_tasks_theme，ON DELETE RESTRICT），必须比 tasks 后清；
+        // 不放这里会让主题行跨测试类泄漏，各主题用例就得各自兜一遍，漏一个就污染后续用例。
+        jdbc.execute("DELETE FROM themes");
         // projects 被 tasks.source_project_id 引用（ON DELETE RESTRICT），必须比 tasks 后清。
         jdbc.execute("DELETE FROM projects");
         jdbc.execute("DELETE FROM decision_items");

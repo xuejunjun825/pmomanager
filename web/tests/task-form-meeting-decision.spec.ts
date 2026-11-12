@@ -391,7 +391,13 @@ describe('建任务抽屉 · 会议决议项必填', () => {
     const sent = JSON.parse(
       JSON.stringify(taskApiMock.update.mock.calls[0]![1]),
     ) as Record<string, unknown>
-    expect(sent).toEqual({ title: '历史会议任务', priority: 'MEDIUM' })
+    // r7 起编辑态恒带 themeId/计划开始字段（0 与 clearPlannedStart 表示清空），但仍不含 source*
+    expect(sent).toEqual({
+      title: '历史会议任务',
+      priority: 'MEDIUM',
+      themeId: 0,
+      clearPlannedStart: true,
+    })
     expect(Object.keys(sent).some((key) => key.startsWith('source'))).toBe(false)
     expect(taskApiMock.create).not.toHaveBeenCalled()
   })

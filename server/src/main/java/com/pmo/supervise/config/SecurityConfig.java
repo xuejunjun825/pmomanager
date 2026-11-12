@@ -52,7 +52,7 @@ public class SecurityConfig {
                         // scripts/smoke-api.sh），因此必须用明文处理器；Spring Security 6 默认的
                         // XorCsrfTokenRequestAttributeHandler 只接受掩码值，浏览器会全站写请求 403。
                         .csrfTokenRequestHandler(new CsrfTokenRequestAttributeHandler())
-                        .csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse()))
+                        .csrfTokenRepository(csrfTokenRepository()))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/auth/**", "/actuator/health", "/error").permitAll()
                         .requestMatchers(org.springframework.http.HttpMethod.OPTIONS, "/**").permitAll()
@@ -86,6 +86,41 @@ public class SecurityConfig {
     @Bean
     public PasswordEncoder passwordEncoder() {
         return new BCryptPasswordEncoder();
+    }
+
+    /**
+     * 双提交 Cookie 的 token 仓库：<b>禁止删除已下发的 token</b>。
+     * <p>6.3.4 下 {@code NullSecurityContextRepository.containsContext} 恒 false，
+     * {@code SessionManagementFilter} 每个请求都会跑一次 {@code CsrfAuthenticationStrategy}，
+     * 它在 cookie 已存在时先 {@code saveToken(null)}（下发 {@code Max-Age=0} 的删除 cookie）
+     * 再生成新 token；两者与 {@link CsrfCookieFilter} 的生成交替出现在响应头里，
+     * 浏览器端 XSRF-TOKEN 于是时有时无，紧接着的写请求就 403 FORBIDDEN（r7 真机实测：
+     * 连续两次写操作第一次 201、第二次 403）。mockmvc 手工拼 Cookie 的用例测不到这一层。
+     * <p>双提交 Cookie 不依赖服务端状态：保留旧 token 一样安全；登出后会话销毁，
+     * 残留 token 无法单独完成鉴权，因此删除没有收益，只会制造 403。
+     */
+    private org.springframework.security.web.csrf.CsrfTokenRepository csrfTokenRepository() {
+        CookieCsrfTokenRepository delegate = CookieCsrfTokenRepository.withHttpOnlyFalse();
+        return new org.springframework.security.web.csrf.CsrfTokenRepository() {
+            @Override
+            public CsrfToken generateToken(jakarta.servlet.http.HttpServletRequest request) {
+                return delegate.generateToken(request);
+            }
+
+            @Override
+            public void saveToken(CsrfToken token, jakarta.servlet.http.HttpServletRequest request,
+                                  jakarta.servlet.http.HttpServletResponse response) {
+                if (token == null) {
+                    return;
+                }
+                delegate.saveToken(token, request, response);
+            }
+
+            @Override
+            public CsrfToken loadToken(jakarta.servlet.http.HttpServletRequest request) {
+                return delegate.loadToken(request);
+            }
+        };
     }
 
     /** 任何 GET 请求访问时把 CSRF token 落到 XSRF-TOKEN cookie（前端 axios 自动回带）。 */

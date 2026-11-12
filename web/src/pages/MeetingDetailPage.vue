@@ -5,12 +5,13 @@
  * - 只有未转任务的事项可勾选、可编辑、可删除，转任务后来源快照锁定；
  * - 转任务部分成功是正常结果：toast 同时报 created 与 skipped（已转过的项跳过，幂等）。
  */
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import PageHeader from '@/components/ui/PageHeader.vue'
 import AppButton from '@/components/ui/AppButton.vue'
 import AppInput from '@/components/ui/AppInput.vue'
 import AppSelect from '@/components/ui/AppSelect.vue'
+import AppSearchSelect from '@/components/ui/AppSearchSelect.vue'
 import AppTextarea from '@/components/ui/AppTextarea.vue'
 import AppDatePicker from '@/components/ui/AppDatePicker.vue'
 import AppBadge from '@/components/ui/AppBadge.vue'
@@ -18,6 +19,9 @@ import StatusBadge from '@/components/ui/StatusBadge.vue'
 import OverduePill from '@/components/ui/OverduePill.vue'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 import Modal from '@/components/ui/Modal.vue'
+import UserMultiSelect from '@/components/ui/UserMultiSelect.vue'
+import MeetingTaskProgress from '@/components/meeting/MeetingTaskProgress.vue'
+import ConvertTasksModal from '@/components/meeting/ConvertTasksModal.vue'
 import ErrorState from '@/components/ui/ErrorState.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import { meetingApi, convertSummary } from '@/api/meetings'
@@ -26,7 +30,16 @@ import { toApiError, type ApiError } from '@/api/http'
 import { useToast } from '@/composables/useToast'
 import { formatDate } from '@/utils/format'
 import type { BadgeTone } from '@/types/enums'
-import type { DecisionItemRequest, DecisionItemRow, MeetingDetail, MeetingRequest, UserOption } from '@/types/api'
+import type {
+  ConvertResult,
+  DecisionItemRequest,
+  DecisionItemRow,
+  MeetingDetail,
+  MeetingRequest,
+  TaskRow,
+  ThemeOptionRow,
+  UserOption,
+} from '@/types/api'
 
 const route = useRoute()
 const router = useRouter()
@@ -43,7 +56,6 @@ const owners = ref<UserOption[]>([])
 const activeOwners = computed(() => owners.value.filter((user) => user.status === 'ACTIVE'))
 
 const selected = ref<number[]>([])
-const converting = ref(false)
 let autoSelect = true
 
 const items = computed<DecisionItemRow[]>(() => (Array.isArray(meeting.value?.items) ? meeting.value!.items : []))
@@ -51,20 +63,48 @@ const unconverted = computed(() => items.value.filter((item) => !item.converted)
 const archived = computed(() => meeting.value?.archived === true)
 const editable = computed(() => !archived.value)
 
-const convertedCount = computed(() => items.value.filter((item) => item.converted).length)
+/* ------------------------------------------------- 任务进度区（AC-4 单一口径） */
+
+/**
+ * 进度区的唯一数据源：`GET /meetings/{id}/tasks`。
+ * 页头不再显示「已转任务 / 未完成」两个数（原先读会议行的 taskCount/unfinishedCount），
+ * 否则同一个「未完成」会因刷新时机不同而出现两个数字。
+ */
+const tasks = ref<TaskRow[]>([])
+const tasksLoading = ref(false)
+const tasksError = ref<ApiError | null>(null)
+const themes = ref<ThemeOptionRow[]>([])
+let tasksSeq = 0
+
+async function loadTasks(): Promise<void> {
+  const current = ++tasksSeq
+  tasksLoading.value = true
+  tasksError.value = null
+  try {
+    const list = await meetingApi.tasks(meetingId.value)
+    if (current !== tasksSeq) return
+    tasks.value = Array.isArray(list) ? list : []
+  } catch (err) {
+    if (current !== tasksSeq) return
+    tasks.value = []
+    tasksError.value = toApiError(err)
+  } finally {
+    if (current === tasksSeq) tasksLoading.value = false
+  }
+}
+
+/** 页头徽标与进度区同源：都由 tasks 算，不再读会议行上的计数 */
+const progressBadge = computed<{ text: string; tone: BadgeTone }>(() => {
+  if (tasks.value.length === 0) return { text: '待派发', tone: 'neutral' }
+  const unfinished = tasks.value.filter((task) => task.status !== 'DONE' && task.status !== 'CANCELLED').length
+  if (unfinished === 0) return { text: '已闭环', tone: 'success' }
+  return { text: `未完成 ${unfinished} 条`, tone: 'warning' }
+})
 
 const allSelected = computed(
   () => unconverted.value.length > 0 && selected.value.length === unconverted.value.length,
 )
 const someSelected = computed(() => selected.value.length > 0 && !allSelected.value)
-
-const statusBadge = computed<{ text: string; tone: BadgeTone }>(() => {
-  const current = meeting.value
-  if (!current) return { text: '—', tone: 'neutral' }
-  if (current.closed) return { text: '已闭环', tone: 'success' }
-  if (current.taskCount > 0) return { text: `未完成 ${current.unfinishedCount} 条`, tone: 'warning' }
-  return { text: '待派发', tone: 'neutral' }
-})
 
 /* ------------------------------------------------------------ 数据加载 */
 
@@ -81,6 +121,8 @@ async function load(): Promise<void> {
       const selectable = new Set(detail.items.filter((item) => !item.converted).map((item) => item.id))
       selected.value = selected.value.filter((id) => selectable.has(id))
     }
+    void loadTasks()
+    applyItemHighlight()
   } catch (err) {
     const apiError = toApiError(err)
     error.value = apiError
@@ -94,15 +136,18 @@ async function load(): Promise<void> {
 onMounted(async () => {
   void load()
   try {
-    owners.value = (await metaApi.options()).owners
+    const options = await metaApi.options()
+    owners.value = options.owners
+    themes.value = Array.isArray(options.themes) ? options.themes : []
   } catch {
-    /* 负责人下拉依赖用户列表；失败时仍可浏览已有事项 */
+    /* 负责人下拉/主题选项依赖元数据；失败时仍可浏览与录入已有事项 */
   }
 })
 
 watch(meetingId, () => {
   autoSelect = true
   selected.value = []
+  tasks.value = []
   cancelEdit()
   void load()
 })
@@ -121,6 +166,17 @@ const meetingForm = ref<{ title: string; meetingDate: string; host: string; note
 const meetingErrors = ref<Record<string, string>>({})
 const meetingTopError = ref('')
 
+/** 主持人仍是姓名文本；选项=启用用户，非系统用户走 allowCustom 原样落库 */
+const hostOptions = computed(() => activeOwners.value.map((user) => ({ label: user.name, value: user.name })))
+
+function onHostChange(value: string): void {
+  meetingForm.value.host = value
+  const matched = activeOwners.value.find((user) => user.name === value.trim())
+  if (matched && !meetingForm.value.attendeeIds.includes(matched.id)) {
+    meetingForm.value.attendeeIds.push(matched.id)
+  }
+}
+
 function openMeetingEdit(): void {
   const current = meeting.value
   if (!current) return
@@ -134,13 +190,6 @@ function openMeetingEdit(): void {
   meetingErrors.value = {}
   meetingTopError.value = ''
   editOpen.value = true
-}
-
-function toggleAttendee(id: number): void {
-  const list = meetingForm.value.attendeeIds
-  const index = list.indexOf(id)
-  if (index >= 0) list.splice(index, 1)
-  else list.push(id)
 }
 
 async function saveMeeting(): Promise<void> {
@@ -270,11 +319,39 @@ function toRequest(): DecisionItemRequest {
   }
 }
 
-/** 单条保存：服务端 fieldErrors 的 index 指向本次请求的那一行，直接回填到当前行 */
-async function saveDraft(): Promise<void> {
+/** 焦点回到出错单元格（AC-3）：整行不刷新，用户改一处即可再提交 */
+async function focusFirstCellError(key: EditingKey): Promise<void> {
+  const order = ['description', 'ownerId', 'dueDate', 'deliveryNote']
+  const field = order.find((name) => cellErrors.value[`${key}:${name}`])
+  if (!field) return
+  await nextTick()
+  const cell = document.querySelector<HTMLElement>(`[data-cell="${key}:${field}"]`)
+  const target = cell?.querySelector<HTMLElement>('input, textarea, select') ?? null
+  target?.focus()
+}
+
+/** 连续录入：Enter 保存成功后立刻开下一行并把焦点放到「描述」 */
+async function saveAndContinue(): Promise<void> {
+  if (rowBusy.value) return
+  const ok = await saveDraft()
+  if (!ok) return
+  startAdd()
+  await nextTick()
+  const cell = document.querySelector<HTMLElement>('[data-cell="new:description"]')
+  cell?.querySelector<HTMLElement>('input, textarea')?.focus()
+}
+
+/**
+ * 单条保存：服务端 fieldErrors 的 index 指向本次请求的那一行，直接回填到当前行。
+ * 返回是否保存成功——`Enter` 连续录入要靠它决定「开下一行」还是「停在出错单元格」。
+ */
+async function saveDraft(): Promise<boolean> {
   const key = editing.value
-  if (key === null) return
-  if (!validateDraft(key)) return
+  if (key === null) return false
+  if (!validateDraft(key)) {
+    void focusFirstCellError(key)
+    return false
+  }
   rowBusy.value = true
   try {
     if (key === 'new') {
@@ -288,14 +365,20 @@ async function saveDraft(): Promise<void> {
     editing.value = null
     cellErrors.value = {}
     await load()
+    return true
   } catch (err) {
     const apiError = toApiError(err)
     const next: Record<string, string> = {}
     for (const field of apiError.fieldErrors ?? []) {
       next[`${key}:${field.field}`] = field.message
     }
-    if (Object.keys(next).length) cellErrors.value = next
-    else toast.error(apiError.message)
+    if (Object.keys(next).length) {
+      cellErrors.value = next
+      void focusFirstCellError(key)
+    } else {
+      toast.error(apiError.message)
+    }
+    return false
   } finally {
     rowBusy.value = false
   }
@@ -335,28 +418,63 @@ function toggleAll(checked: boolean): void {
 }
 
 async function convert(): Promise<void> {
-  if (!selected.value.length || converting.value) return
-  converting.value = true
-  try {
-    const result = await meetingApi.convert(meetingId.value, [...selected.value])
-    toast.success(convertSummary(result))
-    autoSelect = false
-    selected.value = []
-    await load()
-  } catch (err) {
-    toast.error(toApiError(err).message)
-  } finally {
-    converting.value = false
-  }
+  if (!selected.value.length || convertOpen.value) return
+  // 转任务要挂主题与计划开始（AC-9），一律走弹窗统一填写；这里只负责打开
+  convertOpen.value = true
+}
+
+const convertOpen = ref(false)
+
+/** 弹窗要展示的、本次真正要转的决议（勾选 + 未转） */
+const convertTargets = computed(() => unconverted.value.filter((item) => selected.value.includes(item.id)))
+
+async function onConverted(result: ConvertResult): Promise<void> {
+  convertOpen.value = false
+  toast.success(convertSummary(result))
+  autoSelect = false
+  selected.value = []
+  await load()
 }
 
 function itemLink(item: DecisionItemRow): string | null {
   return item.converted && item.taskId ? `/tasks/${item.taskId}` : null
 }
 
+function openTask(id: number): void {
+  void router.push(`/tasks/${id}`)
+}
+
 function isUrl(value: string): boolean {
   return /^https?:\/\//i.test(value)
 }
+
+/* ------------------------------------------------ 从任务详情跳回并高亮（AC-5） */
+
+const highlightedItem = ref<number | null>(null)
+let highlightTimer: ReturnType<typeof setTimeout> | undefined
+
+/**
+ * `?item=<决议项 id>`：滚动到该决议行并高亮 1600ms（DESIGN §3.1 的短暂底色，不改变行高）。
+ * 只有系统用户能看到会议详情（AC-5），所以不需要再按角色分支。
+ */
+function applyItemHighlight(): void {
+  const raw = route.query.item
+  const value = Array.isArray(raw) ? raw[0] : raw
+  const id = Number(value)
+  if (!value || !Number.isFinite(id) || id <= 0) return
+  void nextTick(() => {
+    const target = document.querySelector<HTMLElement>(`[data-item="${id}"]`)
+    if (!target) return
+    target.scrollIntoView?.({ block: 'center', behavior: 'smooth' })
+    highlightedItem.value = id
+    clearTimeout(highlightTimer)
+    highlightTimer = setTimeout(() => {
+      highlightedItem.value = null
+    }, 1600)
+  })
+}
+
+onBeforeUnmount(() => clearTimeout(highlightTimer))
 </script>
 
 <template>
@@ -374,7 +492,7 @@ function isUrl(value: string): boolean {
         <PageHeader :title="meeting.title" :description="`${formatDate(meeting.meetingDate)} · 主持人 ${meeting.host}`">
           <template #meta>
             <div class="meta">
-              <AppBadge :tone="statusBadge.tone" size="sm">{{ statusBadge.text }}</AppBadge>
+              <AppBadge :tone="progressBadge.tone" size="sm">{{ progressBadge.text }}</AppBadge>
               <span v-if="meeting.attendees.length" class="meta__text">
                 参会人：{{ meeting.attendees.map((user) => user.name).join('、') }}
               </span>
@@ -394,9 +512,7 @@ function isUrl(value: string): boolean {
 
         <div class="summary">
           <span class="summary__item"><b class="num">{{ items.length }}</b> 项决议</span>
-          <span class="summary__item"><b class="num">{{ convertedCount }}</b> 已转任务</span>
-          <span class="summary__item"><b class="num" :class="{ 'is-danger': meeting.unfinishedCount > 0 }">{{ meeting.unfinishedCount }}</b> 未完成</span>
-          <span class="summary__item summary__hint">勾选未转任务的决议事项，一键派给负责人</span>
+          <span class="summary__item summary__hint">勾选未转任务的决议事项，一键派给负责人；任务进度见下方进度区</span>
         </div>
 
         <div class="table-wrap">
@@ -431,7 +547,12 @@ function isUrl(value: string): boolean {
               </tr>
             </thead>
             <tbody>
-              <tr v-for="item in items" :key="item.id" :class="{ 'is-locked': item.converted }">
+              <tr
+                v-for="item in items"
+                :key="item.id"
+                :data-item="item.id"
+                :class="{ 'is-locked': item.converted, 'is-highlight': highlightedItem === item.id }"
+              >
                 <td class="col-check">
                   <input
                     type="checkbox"
@@ -526,7 +647,7 @@ function isUrl(value: string): boolean {
 
               <tr v-if="editing === 'new'" class="is-new">
                 <td class="col-check"><span class="muted">新</span></td>
-                <td class="cell-edit">
+                <td class="cell-edit" data-cell="new:description">
                   <AppInput
                     v-model="draft.description"
                     size="compact"
@@ -534,9 +655,11 @@ function isUrl(value: string): boolean {
                     :maxlength="100"
                     :invalid="!!cellError('new', 'description')"
                     :error="cellError('new', 'description')"
+                    @keydown.enter.prevent="saveAndContinue"
+                    @keydown.esc.prevent="cancelEdit"
                   />
                 </td>
-                <td class="cell-edit">
+                <td class="cell-edit" data-cell="new:ownerId">
                   <AppSelect
                     :model-value="draft.ownerId"
                     :options="activeOwners.map((user) => ({ label: user.name, value: String(user.id) }))"
@@ -545,17 +668,21 @@ function isUrl(value: string): boolean {
                     :invalid="!!cellError('new', 'ownerId')"
                     :error="cellError('new', 'ownerId')"
                     @update:model-value="draft.ownerId = $event"
+                    @keydown.enter.prevent="saveAndContinue"
+                    @keydown.esc.prevent="cancelEdit"
                   />
                 </td>
-                <td class="cell-edit">
+                <td class="cell-edit" data-cell="new:dueDate">
                   <AppDatePicker
                     v-model="draft.dueDate"
                     size="compact"
                     :invalid="!!cellError('new', 'dueDate')"
                     :error="cellError('new', 'dueDate')"
+                    @keydown.enter.prevent="saveAndContinue"
+                    @keydown.esc.prevent="cancelEdit"
                   />
                 </td>
-                <td class="cell-edit">
+                <td class="cell-edit" data-cell="new:deliveryNote">
                   <AppInput
                     v-model="draft.deliveryNote"
                     size="compact"
@@ -563,12 +690,17 @@ function isUrl(value: string): boolean {
                     :maxlength="500"
                     :invalid="!!cellError('new', 'deliveryNote')"
                     :error="cellError('new', 'deliveryNote')"
+                    @keydown.enter.prevent="saveAndContinue"
+                    @keydown.esc.prevent="cancelEdit"
                   />
                 </td>
                 <td colspan="2" class="cell-edit cell-actions">
                   <AppButton size="compact" :loading="rowBusy" loading-text="保存中" @click="saveDraft">保存</AppButton>
                   <AppButton size="compact" variant="ghost" :disabled="rowBusy" @click="cancelEdit">取消</AppButton>
                 </td>
+              </tr>
+              <tr v-if="editing === 'new'" class="key-hint-row">
+                <td colspan="7" class="key-hint">Enter 保存并继续录入下一条 · Esc 取消</td>
               </tr>
 
               <tr v-if="!items.length && editing !== 'new'">
@@ -590,11 +722,18 @@ function isUrl(value: string): boolean {
           <span class="items-foot__hint">四项必填：事项描述、负责人、截止日期、来源会议（本会议）</span>
         </div>
 
+        <MeetingTaskProgress
+          :items="tasks"
+          :decision-total="items.length"
+          :loading="tasksLoading"
+          :error="tasksError"
+          @retry="loadTasks"
+          @open="openTask"
+        />
+
         <div v-if="selected.length && editable" class="convert-bar">
           <span class="convert-bar__text">已选 {{ selected.length }} 项（均为未转任务）</span>
-          <AppButton variant="primary" :loading="converting" loading-text="生成中" @click="convert">
-            转为任务
-          </AppButton>
+          <AppButton variant="primary" @click="convert">转为任务</AppButton>
         </div>
       </template>
     </template>
@@ -638,22 +777,29 @@ function isUrl(value: string): boolean {
             :invalid="!!meetingErrors.meetingDate"
             :error="meetingErrors.meetingDate"
           />
-          <AppInput
-            v-model="meetingForm.host"
+          <AppSearchSelect
+            :model-value="meetingForm.host"
+            :options="hostOptions"
             label="主持人"
+            placeholder="搜索或输入姓名"
+            allow-custom
             required
             :invalid="!!meetingErrors.host"
             :error="meetingErrors.host"
+            hint="不在系统里的人也能填，仅记录姓名，不参与提醒与权限"
+            @update:model-value="meetingForm.host = $event"
+            @change="onHostChange"
           />
         </div>
         <fieldset class="attendees">
           <legend class="attendees__legend">参会人</legend>
-          <div class="attendees__list">
-            <label v-for="user in activeOwners" :key="user.id" class="attendees__item">
-              <input type="checkbox" :checked="meetingForm.attendeeIds.includes(user.id)" @change="toggleAttendee(user.id)" />
-              <span>{{ user.name }}</span>
-            </label>
-          </div>
+          <UserMultiSelect
+            v-model="meetingForm.attendeeIds"
+            :options="owners"
+            placeholder="搜索并添加参会人"
+            :invalid="!!meetingErrors.attendeeIds"
+            :error="meetingErrors.attendeeIds"
+          />
         </fieldset>
         <AppTextarea v-model="meetingForm.note" label="会议备注" :rows="2" :maxlength="200" placeholder="可选" />
         <p v-if="meetingTopError" class="form__error" role="alert">{{ meetingTopError }}</p>
@@ -663,6 +809,15 @@ function isUrl(value: string): boolean {
         </div>
       </form>
     </Modal>
+
+    <ConvertTasksModal
+      :open="convertOpen"
+      :meeting-id="meetingId"
+      :selected="convertTargets"
+      :themes="themes"
+      @close="convertOpen = false"
+      @converted="onConverted"
+    />
 
     <div class="back">
       <RouterLink to="/meetings" class="back__link">← 返回会议列表</RouterLink>
@@ -806,6 +961,25 @@ function isUrl(value: string): boolean {
 .cell-empty {
   padding: var(--sp-8) var(--sp-4);
 }
+/* 从任务详情跳回时的高亮：只改背景，不动行高，1600ms 后自动褪掉 */
+.is-highlight > td {
+  background: var(--c-primary-soft);
+  animation: item-flash 1600ms var(--ease) forwards;
+}
+@keyframes item-flash {
+  0%,
+  70% {
+    background: var(--c-primary-soft);
+  }
+  100% {
+    background: transparent;
+  }
+}
+.key-hint-row td.key-hint {
+  padding: 0 var(--sp-2) var(--sp-2);
+  font-size: var(--fs-caption);
+  color: var(--c-ink-500);
+}
 .status-link {
   text-decoration: none;
 }
@@ -872,21 +1046,6 @@ function isUrl(value: string): boolean {
   font-weight: 500;
   color: var(--c-ink-700);
   margin-bottom: var(--sp-2);
-}
-.attendees__list {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: var(--sp-2) var(--sp-3);
-  max-height: 140px;
-  overflow-y: auto;
-}
-.attendees__item {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--sp-2);
-  font-size: var(--fs-body-sm);
-  color: var(--c-ink-700);
-  cursor: pointer;
 }
 .back {
   display: flex;

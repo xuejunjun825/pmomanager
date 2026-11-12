@@ -25,9 +25,11 @@ import type {
   ProjectOptionRow,
   SourceTypeOption,
   TaskDetail,
+  ThemeOptionRow,
   UserOption,
 } from '@/types/api'
 import { sourceOptions as buildSourceOptions, type SourceOption } from '@/utils/sourceOptions'
+import { themeOptions as buildThemeOptions } from '@/utils/themeOptions'
 import {
   DISABLED_SUFFIX,
   projectOptions as buildProjectOptions,
@@ -44,8 +46,10 @@ const props = withDefaults(
     sourceTypes?: SourceTypeOption[]
     /** meta.projects 全量（含已停用）；新建只列启用项，编辑态用快照回显 */
     projects?: ProjectOptionRow[]
+    /** meta.themes 全量（含已停用）；编辑态回显当前主题，停用项置灰不可选 */
+    themes?: ThemeOptionRow[]
   }>(),
-  { task: null, sourceTypes: () => [], projects: () => [] },
+  { task: null, sourceTypes: () => [], projects: () => [], themes: () => [] },
 )
 
 const emit = defineEmits<{
@@ -79,6 +83,10 @@ interface FormState {
   projectId: number | ''
   note: string
   priority: Priority
+  /** 主题：'' 未挂主题（提交时转 0 清空）| '<id>' */
+  themeId: string
+  /** 计划开始：可空；留空时不写入数据库，甘特按创建日推算（DESIGN §3.7） */
+  plannedStartDate: string
 }
 
 const form = reactive<FormState>(blankForm())
@@ -148,6 +156,11 @@ const currentProjectLabel = computed(() => {
   const name = view.name || `项目 #${props.task?.source?.projectId}`
   return view.enabled ? name : `${name}${DISABLED_SUFFIX}`
 })
+
+/** 主题可选项：含「未挂主题」（value=none）、停用项置灰；默认不挂主题，不是必填（PRD §10） */
+const themeItems = computed(() =>
+  buildThemeOptions(props.themes, { allOption: false, includeDisabled: true, includeUnassigned: true }),
+)
 
 const ownerOptions = computed(() =>
   (Array.isArray(props.owners) ? props.owners : []).map((owner) => ({
@@ -224,6 +237,8 @@ function blankForm(): FormState {
     projectId: '',
     note: '',
     priority: 'MEDIUM',
+    themeId: 'none',
+    plannedStartDate: '',
   }
 }
 
@@ -287,6 +302,8 @@ function resetForm(): void {
   form.projectId = task.source?.projectId ?? ''
   form.note = task.source?.note ?? ''
   form.priority = task.priority ?? 'MEDIUM'
+  form.themeId = task.theme?.id != null ? String(task.theme.id) : 'none'
+  form.plannedStartDate = task.plannedStartDate ?? ''
   // 编辑态只读行需要决议项描述：与新建共用同一个加载入口（不再写第二个 fetch）
   if (activeForm.value === 'MEETING' && form.meetingId !== '') {
     void loadItems(Number(form.meetingId))
@@ -496,12 +513,21 @@ async function save(): Promise<void> {
       ? await taskApi.update(props.task.id, {
           title: form.title.trim(),
           priority: form.priority,
+          // 主题可空：'' = 未挂主题，服务端以 0 表示清空（null 才是「不改」）
+          themeId: form.themeId === 'none' || form.themeId === '' ? 0 : Number(form.themeId),
+          // 日期没有 0 语义，清空走 clearPlannedStart（DESIGN §3.7）
+          ...(form.plannedStartDate
+            ? { plannedStartDate: form.plannedStartDate }
+            : { clearPlannedStart: true }),
           // 来源不可改（D6）：编辑态不提交任何 source* 字段，服务端也不会接受
         })
       : await taskApi.create({
           title: form.title.trim(),
           ownerId: form.ownerId === '' ? null : Number(form.ownerId),
           dueDate: form.dueDate,
+          themeId:
+            form.themeId === 'none' || form.themeId === '' ? undefined : Number(form.themeId),
+          plannedStartDate: form.plannedStartDate || undefined,
           sourceType: form.sourceType,
           // 三态互斥（AC-2）：按形态只带自己那一组字段，另外两组一律不出现
           sourceMeetingId: activeForm.value === 'MEETING' ? Number(form.meetingId) : undefined,
@@ -715,6 +741,32 @@ async function save(): Promise<void> {
             @update:model-value="form.dueDate = $event; clearError('dueDate')"
           />
         </div>
+        <div class="task-form__pair">
+          <div :ref="(el) => setFieldEl('themeId', el)">
+            <AppSelect
+              :model-value="form.themeId"
+              :options="themeItems"
+              label="主题"
+              placeholder="选择主题"
+              :invalid="Boolean(errors.themeId)"
+              :error="errors.themeId"
+              @update:model-value="form.themeId = $event || 'none'; clearError('themeId')"
+            />
+          </div>
+          <div :ref="(el) => setFieldEl('plannedStartDate', el)">
+            <AppDatePicker
+              :model-value="form.plannedStartDate"
+              label="计划开始"
+              :max="form.dueDate || undefined"
+              :invalid="Boolean(errors.plannedStartDate)"
+              :error="errors.plannedStartDate"
+              @update:model-value="form.plannedStartDate = $event; clearError('plannedStartDate')"
+            />
+          </div>
+        </div>
+        <p class="task-form__hint">
+          主题可空（甘特归「未挂主题」）；计划开始留空时不写入数据库，甘特按创建日推算。
+        </p>
         <p v-if="dueDateInPast && !isEdit" class="task-form__warn">
           该截止日期已过期，保存后将立即显示逾期
         </p>
@@ -779,6 +831,17 @@ async function save(): Promise<void> {
   margin: 0;
   font-size: var(--fs-caption);
   color: var(--c-ink-500);
+}
+/* 主题 + 计划开始并排：两列等分，窄屏纵向堆叠（DESIGN §3.7） */
+.task-form__pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-3);
+}
+@media (max-width: 520px) {
+  .task-form__pair {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 .task-form__hint-key {
   display: inline-block;

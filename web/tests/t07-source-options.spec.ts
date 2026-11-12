@@ -48,6 +48,7 @@ const FILTERS: PoolFilters = {
   ownerId: '',
   sourceType: '',
   project: '',
+  theme: '',
   meetingId: '',
   overdue: '',
   keyword: '',

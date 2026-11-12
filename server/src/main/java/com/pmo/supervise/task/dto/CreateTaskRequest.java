@@ -38,5 +38,19 @@ public record CreateTaskRequest(
         Priority priority,
 
         /** form=PROJECT 的来源必填；其它形态传了就 422（由 Service 判定，不在这里做形态推断）。 */
-        Long sourceProjectId) {
+        Long sourceProjectId,
+
+        /** 主题（r7）：可空 = 未归主题；非空时必须是启用中的主题（Service 校验，422 回填 themeId）。 */
+        Long themeId,
+
+        /** 计划开始（r7）：可空；非空时必须 ≤ 截止日期（422 回填 plannedStartDate）。 */
+        LocalDate plannedStartDate) {
+
+    /** 兼容 r7 之前的调用方（无主题/计划开始）；等价于 themeId=null、plannedStartDate=null。 */
+    public CreateTaskRequest(String title, Long ownerId, LocalDate dueDate, String sourceType,
+                             Long sourceMeetingId, Long sourceDecisionItemId, String sourceNote,
+                             Priority priority, Long sourceProjectId) {
+        this(title, ownerId, dueDate, sourceType, sourceMeetingId, sourceDecisionItemId, sourceNote,
+                priority, sourceProjectId, null, null);
+    }
 }

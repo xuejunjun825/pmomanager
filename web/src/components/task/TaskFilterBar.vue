@@ -10,8 +10,9 @@ import AppSelect from '@/components/ui/AppSelect.vue'
 import AppButton from '@/components/ui/AppButton.vue'
 import type { SourceType, TaskStatus } from '@/types/enums'
 import { TASK_STATUS_LABELS } from '@/types/enums'
-import type { ProjectOptionRow, SourceTypeOption, UserOption } from '@/types/api'
+import type { ProjectOptionRow, SourceTypeOption, ThemeOptionRow, UserOption } from '@/types/api'
 import { sourceOptions as buildSourceOptions } from '@/utils/sourceOptions'
+import { themeOptions as buildThemeOptions } from '@/utils/themeOptions'
 import {
   UNASSIGNED_VALUE,
   projectOptions as buildProjectOptions,
@@ -24,6 +25,8 @@ export interface PoolFilters {
   sourceType: SourceType | ''
   /** `'<id>'` | `'none'`（未指定项目）| `''`（全部）—— 与 URL 短键 `project` 同值域 */
   project: string
+  /** `'<id>'` | `'none'`（未挂主题）| `''`（全部）—— 与 URL 短键 `theme` 同值域 */
+  theme: string
   meetingId: number | ''
   overdue: boolean | ''
   keyword: string
@@ -38,9 +41,11 @@ const props = withDefaults(
     sourceTypes?: SourceTypeOption[]
     /** meta.projects 全量（含已停用）：停用项目仍要能筛历史任务（AC-5） */
     projects?: ProjectOptionRow[]
+    /** meta.themes 全量（含已停用）：停用主题仍要能筛历史任务 */
+    themes?: ThemeOptionRow[]
     loading?: boolean
   }>(),
-  { sourceTypes: () => [], projects: () => [], loading: false },
+  { sourceTypes: () => [], projects: () => [], themes: () => [], loading: false },
 )
 
 const emit = defineEmits<{ 'update:modelValue': [value: PoolFilters] }>()
@@ -65,6 +70,15 @@ const sourceOptions = computed(() => buildSourceOptions(props.sourceTypes))
  */
 const projectItems = computed<ProjectOption[]>(() =>
   buildProjectOptions(props.projects, {
+    allOption: true,
+    includeDisabled: true,
+    includeUnassigned: true,
+  }),
+)
+
+/** 主题筛选的选项同样来自唯一投影：含停用项与「未挂主题」档，与表单/甘特同一函数 */
+const themeItems = computed(() =>
+  buildThemeOptions(props.themes, {
     allOption: true,
     includeDisabled: true,
     includeUnassigned: true,
@@ -132,6 +146,11 @@ const chips = computed<Chip[]>(() => {
     const fallback = filter.project === UNASSIGNED_VALUE ? '未指定项目' : `项目 #${filter.project}`
     list.push({ key: 'project', label: `项目：${project?.label ?? fallback}` })
   }
+  if (filter.theme) {
+    const theme = themeItems.value.find((item) => item.value === filter.theme)
+    const fallback = filter.theme === UNASSIGNED_VALUE ? '未挂主题' : `主题 #${filter.theme}`
+    list.push({ key: 'theme', label: `主题：${theme?.label ?? fallback}` })
+  }
   if (filter.meetingId !== '') {
     const meeting = props.meetings.find((item) => item.id === filter.meetingId)
     list.push({ key: 'meetingId', label: meeting ? meeting.title : `会议 #${filter.meetingId}` })
@@ -147,6 +166,7 @@ function removeChip(key: keyof PoolFilters): void {
   else if (key === 'status') patch({ status: '' })
   else if (key === 'sourceType') patch({ sourceType: '' })
   else if (key === 'project') patch({ project: '' })
+  else if (key === 'theme') patch({ theme: '' })
   else if (key === 'ownerId') patch({ ownerId: '' })
   else patch({ meetingId: '' })
 }
@@ -157,6 +177,7 @@ function clearAll(): void {
     ownerId: '',
     sourceType: '',
     project: '',
+    theme: '',
     meetingId: '',
     overdue: '',
     keyword: '',
@@ -206,6 +227,14 @@ function clearAll(): void {
         aria-label="项目筛选"
         empty-text="没有匹配的项目"
         @update:model-value="patch({ project: $event })"
+      />
+      <AppSelect
+        class="filter__theme"
+        :model-value="modelValue.theme"
+        :options="themeItems"
+        size="compact"
+        aria-label="主题筛选"
+        @update:model-value="patch({ theme: $event })"
       />
       <AppSelect
         :model-value="modelValue.meetingId"
@@ -260,6 +289,11 @@ function clearAll(): void {
   width: 148px;
   flex: none;
 }
+/* 主题位 168：放得下「全部主题 / 未挂主题 / 各主题名（已停用）」 */
+.filter__theme {
+  width: 168px;
+  flex: none;
+}
 .filter__chips {
   display: flex;
   flex-wrap: wrap;
@@ -305,6 +339,9 @@ function clearAll(): void {
     min-width: 0;
   }
   .filter__project {
+    width: auto;
+  }
+  .filter__theme {
     width: auto;
   }
 }

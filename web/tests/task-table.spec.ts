@@ -27,17 +27,17 @@ function row(overrides: Partial<TaskRow> = {}): TaskRow {
 }
 
 describe('TaskTable', () => {
-  it('数据列宽合计 940px，加 24px 箭头列 = 964px（9 个格子）', () => {
+  it('数据列宽合计 1036px，加 24px 箭头列 = 1060px（10 个格子）', () => {
     const wrapper = mount(TaskTable, { props: { items: [row()] } })
     const headers = wrapper.findAll('thead th')
-    expect(headers).toHaveLength(8)
+    expect(headers).toHaveLength(9)
     const total = headers.reduce(
       (sum, th) => sum + Number.parseFloat((th.element as HTMLElement).style.width || '0'),
       0,
     )
-    expect(total).toBe(940)
-    // 箭头列只出现在行尾（DataTable 的 clickable 约定），8 + 1 = 9
-    expect(wrapper.findAll('tbody tr:first-child td')).toHaveLength(9)
+    expect(total).toBe(1036)
+    // 箭头列只出现在行尾（DataTable 的 clickable 约定），9 + 1 = 10
+    expect(wrapper.findAll('tbody tr:first-child td')).toHaveLength(10)
     expect(wrapper.find('.table__chevron').exists()).toBe(true)
   })
 

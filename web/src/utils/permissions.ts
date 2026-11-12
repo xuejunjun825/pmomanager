@@ -6,7 +6,15 @@
  */
 import type { Role } from '@/types/enums'
 
-export type NavIcon = 'dashboard' | 'matrix' | 'tasks' | 'my' | 'meetings' | 'users' | 'settings'
+export type NavIcon =
+  | 'dashboard'
+  | 'matrix'
+  | 'gantt'
+  | 'tasks'
+  | 'my'
+  | 'meetings'
+  | 'users'
+  | 'settings'
 
 export interface NavItem {
   key: string
@@ -29,6 +37,7 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     items: [
       { key: 'dashboard', label: '督办看板', path: '/dashboard', icon: 'dashboard', roles: ['ADMIN', 'EXEC'] },
       { key: 'matrix', label: '闭环矩阵', path: '/matrix', icon: 'matrix', roles: ['ADMIN', 'EXEC'] },
+      { key: 'gantt', label: '进度甘特', path: '/gantt', icon: 'gantt', roles: ['ADMIN', 'EXEC'] },
     ],
   },
   {
@@ -75,6 +84,7 @@ const PAGE_ACCESS: ReadonlyArray<{ pattern: RegExp; roles: readonly Role[] }> = 
   { pattern: /^\/my$/, roles: ['ADMIN', 'OWNER'] },
   { pattern: /^\/meetings(?:\/\d+)?$/, roles: ['ADMIN'] },
   { pattern: /^\/matrix$/, roles: ['ADMIN', 'EXEC'] },
+  { pattern: /^\/gantt$/, roles: ['ADMIN', 'EXEC'] },
   { pattern: /^\/dashboard$/, roles: ['ADMIN', 'EXEC'] },
   { pattern: /^\/users$/, roles: ['ADMIN'] },
   { pattern: /^\/settings$/, roles: ['ADMIN'] },

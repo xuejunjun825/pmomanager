@@ -3,14 +3,15 @@ package com.pmo.supervise.meeting;
 import com.pmo.supervise.common.Actor;
 import com.pmo.supervise.common.PageResponse;
 import com.pmo.supervise.common.ShanghaiClock;
+import com.pmo.supervise.meeting.dto.ConvertRequest;
 import com.pmo.supervise.meeting.dto.ConvertResult;
 import com.pmo.supervise.meeting.dto.DecisionItemRequest;
 import com.pmo.supervise.meeting.dto.DecisionItemRow;
 import com.pmo.supervise.meeting.dto.MeetingDetail;
 import com.pmo.supervise.meeting.dto.MeetingRequest;
 import com.pmo.supervise.meeting.dto.MeetingRow;
+import com.pmo.supervise.task.dto.TaskRow;
 import jakarta.validation.Valid;
-import jakarta.validation.constraints.NotNull;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -93,12 +94,14 @@ public class MeetingController {
         meetingService.deleteItem(id, actor);
     }
 
-    @PostMapping("/meetings/{id}/convert")
-    public ConvertResult convert(@PathVariable long id, @Valid @RequestBody ConvertRequest req, Actor actor) {
-        return conversionService.convert(id, actor, req.itemIds());
+    /** 会议任务清单（AC-4）：详情页进度区一次拿全，列表页不背任务集合。 */
+    @GetMapping("/meetings/{id}/tasks")
+    public List<TaskRow> tasks(@PathVariable long id, Actor actor) {
+        return meetingService.tasks(id, actor, clock.today());
     }
 
-    /** 转任务勾选列表：前端默认全选，未勾选时 422 itemIds。 */
-    public record ConvertRequest(@NotNull List<Long> itemIds) {
+    @PostMapping("/meetings/{id}/convert")
+    public ConvertResult convert(@PathVariable long id, @Valid @RequestBody ConvertRequest req, Actor actor) {
+        return conversionService.convert(id, actor, req.itemIds(), req.themeId(), req.plannedStartDate());
     }
 }

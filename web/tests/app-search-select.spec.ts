@@ -133,3 +133,56 @@ describe('AppSearchSelect', () => {
     wrapper.unmount()
   })
 })
+
+/**
+ * allowCustom（r7 T7）：主持人保留自由文本，零迁移。
+ * 只有显式开启才追加候选；默认调用的文案与行为必须保持原样（上一组用例已钉住）。
+ */
+describe('AppSearchSelect allowCustom', () => {
+  const HOSTS = [
+    { label: '张三', value: '张三' },
+    { label: '李四', value: '李四' },
+  ]
+
+  function mountHost(modelValue = '') {
+    return mount(AppSearchSelect, {
+      attachTo: document.body,
+      props: { modelValue, options: HOSTS, allowCustom: true },
+      attrs: { 'aria-label': '主持人' },
+    })
+  }
+
+  it('输入不在列表里的姓名：尾部追加「使用「X」作为主持人（非系统用户）」', async () => {
+    const wrapper = mountHost()
+    await open(wrapper)
+    const input = wrapper.find('input')
+    await input.setValue('王五')
+    const options = wrapper.findAll('[role="option"]')
+    expect(options).toHaveLength(1)
+    expect(options[0].text()).toContain('使用「王五」作为主持人（非系统用户）')
+    expect(options[0].classes()).toContain('is-custom')
+    wrapper.unmount()
+  })
+
+  it('选中自由文本：emit 原文（不包装成对象或 id），显示带「（非系统用户）」说明', async () => {
+    const wrapper = mountHost()
+    await open(wrapper)
+    await wrapper.find('input').setValue('王五')
+    await wrapper.findAll('[role="option"]')[0].trigger('click')
+    expect(wrapper.emitted('update:modelValue')?.[0]).toEqual(['王五'])
+    await wrapper.setProps({ modelValue: '王五' })
+    expect((wrapper.find('input').element as HTMLInputElement).value).toBe('王五（非系统用户）')
+    wrapper.unmount()
+  })
+
+  it('与已有选项同名时不生成自由文本候选；底栏计数只数真实选项', async () => {
+    const wrapper = mountHost()
+    await open(wrapper)
+    await wrapper.find('input').setValue('张三')
+    expect(wrapper.findAll('[role="option"]')).toHaveLength(1)
+    expect(wrapper.find('.option.is-custom').exists()).toBe(false)
+    await wrapper.find('input').setValue('')
+    expect(wrapper.find('.panel__footer').text()).toBe('共 2 项 · 显示 2 项')
+    wrapper.unmount()
+  })
+})

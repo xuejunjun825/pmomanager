@@ -18,6 +18,8 @@ export interface SearchSelectOption {
   value: string
   /** 停用项：可见可读、标记 aria-disabled、键盘跳过、点击无效 */
   disabled?: boolean
+  /** 自由文本候选（allowCustom）：无匹配时尾部生成，值即原文 */
+  custom?: boolean
 }
 
 const props = withDefaults(
@@ -36,6 +38,11 @@ const props = withDefaults(
     emptyText?: string
     /** meta 未到时显示 3 行骨架，不显示「没有匹配」（DESIGN §1.4） */
     loading?: boolean
+    /**
+     * 允许自由文本（DESIGN §3.4）：无匹配时列表尾部给「使用「X」作为…（非系统用户）」，
+     * 落库为原文。默认 false，既有项目场景零变化。
+     */
+    allowCustom?: boolean
   }>(),
   {
     size: 'default',
@@ -45,6 +52,7 @@ const props = withDefaults(
     loading: false,
     placeholder: '请选择',
     emptyText: '没有匹配的项目',
+    allowCustom: false,
   },
 )
 
@@ -85,20 +93,53 @@ const inputRef = ref<HTMLInputElement | null>(null)
 
 const selectedValue = computed(() => props.modelValue ?? '')
 const selectedOption = computed(() => props.options.find((item) => item.value === selectedValue.value))
-const displayLabel = computed(() => selectedOption.value?.label ?? '')
-
-const filteredOptions = computed(() => {
-  const keyword = query.value.trim().toLowerCase()
-  if (!keyword) return props.options
-  return props.options.filter((item) => item.label.toLowerCase().includes(keyword))
+/**
+ * 关闭态显示：命中选项用选项名；allowCustom 且当前值是列表外的原文时，
+ * 显示「值（非系统用户）」，历史主持人文本零迁移也不会看起来像丢了。
+ */
+const displayLabel = computed(() => {
+  if (selectedOption.value) return selectedOption.value.label
+  if (props.allowCustom && selectedValue.value.trim()) return `${selectedValue.value}（非系统用户）`
+  return ''
 })
 
-/** 底栏计数只数真实项目：排除「全部项目」（''）与「未指定项目」（none） */
+/** 输入原文且与任何选项名称都不完全相等时才生成自由文本候选 */
+const customQuery = computed(() => {
+  if (!props.allowCustom) return ''
+  const keyword = query.value.trim()
+  if (!keyword) return ''
+  const exact = props.options.some((item) => item.label.trim().toLowerCase() === keyword.toLowerCase())
+  return exact ? '' : keyword
+})
+
+const filteredOptions = computed<SearchSelectOption[]>(() => {
+  const keyword = query.value.trim().toLowerCase()
+  const base = !keyword
+    ? props.options
+    : props.options.filter((item) => item.label.toLowerCase().includes(keyword))
+  if (!customQuery.value) return base
+  return [
+    ...base,
+    {
+      label: `使用「${customQuery.value}」作为主持人（非系统用户）`,
+      value: customQuery.value,
+      custom: true,
+    },
+  ]
+})
+
+/** 底栏计数只数真实项目：排除「全部项目」（''）、「未指定项目」（none）与自由文本候选 */
 const totalCount = computed(
-  () => props.options.filter((item) => item.value !== '' && item.value !== UNASSIGNED_VALUE).length,
+  () =>
+    props.options.filter(
+      (item) => item.value !== '' && item.value !== UNASSIGNED_VALUE && !item.custom,
+    ).length,
 )
 const visibleCount = computed(
-  () => filteredOptions.value.filter((item) => item.value !== '' && item.value !== UNASSIGNED_VALUE).length,
+  () =>
+    filteredOptions.value.filter(
+      (item) => item.value !== '' && item.value !== UNASSIGNED_VALUE && !item.custom,
+    ).length,
 )
 
 const activeDescendant = computed(() =>
@@ -129,7 +170,9 @@ async function scrollActiveIntoView(): Promise<void> {
 
 async function openDropdown(initialQuery = ''): Promise<void> {
   if (props.disabled || open.value) return
-  query.value = initialQuery
+  // allowCustom：当前值是列表外原文时，打开即带原文，便于直接回车确认或改写
+  query.value =
+    initialQuery || (props.allowCustom && !selectedOption.value ? selectedValue.value : '')
   navigated.value = false
   activeIndex.value = -1
   open.value = true
@@ -345,6 +388,7 @@ onBeforeUnmount(() => {
               'is-active': index === activeIndex,
               'is-selected': option.value === selectedValue,
               'is-disabled': option.disabled,
+              'is-custom': option.custom,
             }"
             :aria-selected="option.value === selectedValue"
             :aria-disabled="option.disabled ? 'true' : undefined"
@@ -359,7 +403,8 @@ onBeforeUnmount(() => {
           <button v-if="query" type="button" class="empty__clear" @click="clearSearch">清除搜索</button>
         </div>
         <div v-if="!loading" class="panel__footer" aria-live="polite">
-          共 {{ totalCount }} 个项目 · 显示 {{ visibleCount }} 个
+          <template v-if="allowCustom">共 {{ totalCount }} 项 · 显示 {{ visibleCount }} 项</template>
+          <template v-else>共 {{ totalCount }} 个项目 · 显示 {{ visibleCount }} 个</template>
         </div>
       </div>
     </Transition>
@@ -509,6 +554,15 @@ onBeforeUnmount(() => {
 }
 .option.is-selected {
   background: var(--c-primary-soft);
+  color: var(--c-primary);
+}
+/* 自由文本候选：与真实选项拉开层次，避免被误认为系统用户 */
+.option.is-custom {
+  border-top: 1px dashed var(--c-line);
+  color: var(--c-ink-700);
+  font-style: normal;
+}
+.option.is-custom .option__text {
   color: var(--c-primary);
 }
 .option__text {

@@ -47,7 +47,7 @@ class TaskServiceIT extends IntegrationTestSupport {
     void createMeetingTask() {
         TaskDetailRow detail = taskService.create(actor(adminId), new CreateTaskRequest(
                 "输出周会纪要", ownerId, due, SourceCodes.MEETING, meetingId, decisionItemId, null,
-                Priority.HIGH, null), clock.today());
+                Priority.HIGH, null, null, null), clock.today());
 
         assertThat(detail.source().type()).isEqualTo(SourceCodes.MEETING);
         assertThat(detail.source().meetingTitle()).isEqualTo("产品周会");
@@ -61,7 +61,7 @@ class TaskServiceIT extends IntegrationTestSupport {
     @DisplayName("会议来源缺会议或决议项 → 422 且 fieldErrors 指名")
     void meetingSourceRequiresBothIds() {
         assertThatThrownBy(() -> taskService.create(actor(adminId), new CreateTaskRequest(
-                "缺会议", ownerId, due, SourceCodes.MEETING, null, null, null, null, null), clock.today()))
+                "缺会议", ownerId, due, SourceCodes.MEETING, null, null, null, null, null, null, null), clock.today()))
                 .isInstanceOf(BusinessException.class)
                 .satisfies(ex -> {
                     BusinessException be = (BusinessException) ex;

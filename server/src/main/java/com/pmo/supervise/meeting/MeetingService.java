@@ -13,7 +13,9 @@ import com.pmo.supervise.meeting.dto.MeetingRequest;
 import com.pmo.supervise.meeting.dto.MeetingRow;
 import com.pmo.supervise.task.OverdueSpec;
 import com.pmo.supervise.task.TaskAccessGuard;
+import com.pmo.supervise.task.TaskQueryDao;
 import com.pmo.supervise.task.TaskSql;
+import com.pmo.supervise.task.dto.TaskRow;
 import com.pmo.supervise.task.dto.UserRef;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
@@ -39,6 +41,9 @@ import java.util.Objects;
  */
 @Service
 public class MeetingService {
+
+    /** 一次建会最多录入的决议条数（AC-2）：与前端建会弹窗的行数上限一致。 */
+    public static final int MAX_BATCH_ITEMS = 50;
 
     private static final String MEETING_COLUMNS = """
             SELECT m.id, m.title, m.meeting_date, m.host, m.archived,
@@ -68,14 +73,17 @@ public class MeetingService {
     private final MeetingRepository meetingRepository;
     private final DecisionItemRepository itemRepository;
     private final TaskAccessGuard guard;
+    private final TaskQueryDao taskQueryDao;
     private final JdbcTemplate jdbc;
     private final NamedParameterJdbcTemplate namedJdbc;
 
     public MeetingService(MeetingRepository meetingRepository, DecisionItemRepository itemRepository,
-                          TaskAccessGuard guard, JdbcTemplate jdbc, NamedParameterJdbcTemplate namedJdbc) {
+                          TaskAccessGuard guard, TaskQueryDao taskQueryDao,
+                          JdbcTemplate jdbc, NamedParameterJdbcTemplate namedJdbc) {
         this.meetingRepository = meetingRepository;
         this.itemRepository = itemRepository;
         this.guard = guard;
+        this.taskQueryDao = taskQueryDao;
         this.jdbc = jdbc;
         this.namedJdbc = namedJdbc;
     }
@@ -105,14 +113,24 @@ public class MeetingService {
         return PageResponse.of(rows, total == null ? 0 : total, safePage, safeSize);
     }
 
+    /**
+     * 建会（AC-2）：会议与 0..50 条决议项同事务。
+     * 校验顺序与 TECHNICAL §1.3 一致：参会人 → 批量决议项，
+     * 任一条非法即 422 且会议与决议都不落库。
+     */
     @Transactional
     public MeetingDetail create(Actor actor, MeetingRequest req, LocalDate today) {
         guard.requireAdmin(actor);
 
+        List<Long> attendees = validateAttendees(req.attendeeIds());
+        List<DecisionItemRequest> items = req.items() == null ? List.of() : req.items();
+        validateBatchItems(items);
+
         Meeting meeting = new Meeting();
-        apply(meeting, req);
+        apply(meeting, req, attendees);
         meeting.setCreatedBy(actor.id());
         meeting = meetingRepository.saveAndFlush(meeting);
+        saveItems(meeting.getId(), items);
         return get(meeting.getId(), today);
     }
 
@@ -123,7 +141,7 @@ public class MeetingService {
         if (isArchived(id)) {
             throw new BusinessException(ErrorCode.MEETING_ARCHIVED);
         }
-        apply(meeting, req);
+        apply(meeting, req, validateAttendees(req.attendeeIds()));
         meetingRepository.saveAndFlush(meeting);
         return get(id, today);
     }
@@ -164,6 +182,62 @@ public class MeetingService {
     }
 
     // ---------------------------------------------------------------- 决议事项
+
+    /**
+     * 会议任务清单（AC-4）：进度区的四个计数由前端从这一份数组一次算出，
+     * 不塞进 MeetingDetail——列表页不该为每行会议带上 N 条任务。
+     */
+    @Transactional(readOnly = true)
+    public List<TaskRow> tasks(long id, Actor actor, LocalDate today) {
+        guard.requireAdmin(actor);
+        require(id);
+        return taskQueryDao.byMeeting(id, today);
+    }
+
+    /**
+     * 批量建会决议校验（AC-2）：逐条复用单条校验，字段名拼成 {@code items[K].<field>}，
+     * K 为 1 基行号，前端可直接映射到行内单元格；全部合法才落库。
+     */
+    public void validateBatchItems(List<DecisionItemRequest> items) {
+        if (items == null || items.isEmpty()) {
+            return;
+        }
+        if (items.size() > MAX_BATCH_ITEMS) {
+            throw BusinessException.validation("items",
+                    "一次最多录入 " + MAX_BATCH_ITEMS + " 条决议事项（当前 " + items.size() + " 条）");
+        }
+        List<ApiError.FieldError> errors = new ArrayList<>();
+        for (int i = 0; i < items.size(); i++) {
+            int row = i + 1;
+            DecisionItemRequest item = items.get(i);
+            if (item == null) {
+                errors.add(new ApiError.FieldError("items[" + row + "]", "决议事项不能为空", row));
+                continue;
+            }
+            for (ApiError.FieldError error : validateItem(item, row)) {
+                errors.add(new ApiError.FieldError(
+                        "items[" + row + "]." + error.field(), error.message(), row));
+            }
+        }
+        throwIfInvalid(errors);
+    }
+
+    /** 建会时随会议一次落库：sortNo 从 0 递增，顺序即用户录入顺序。 */
+    private void saveItems(long meetingId, List<DecisionItemRequest> items) {
+        if (items.isEmpty()) {
+            return;
+        }
+        List<DecisionItem> entities = new ArrayList<>(items.size());
+        for (int i = 0; i < items.size(); i++) {
+            DecisionItem item = new DecisionItem();
+            item.setMeetingId(meetingId);
+            apply(item, items.get(i));
+            item.setSortNo(i);
+            entities.add(item);
+        }
+        itemRepository.saveAll(entities);
+        itemRepository.flush();
+    }
 
     @Transactional
     public DecisionItemRow addItem(long meetingId, Actor actor, DecisionItemRequest req, LocalDate today) {
@@ -241,11 +315,11 @@ public class MeetingService {
 
     // ---------------------------------------------------------------- 内部
 
-    private void apply(Meeting meeting, MeetingRequest req) {
+    private void apply(Meeting meeting, MeetingRequest req, List<Long> attendees) {
         meeting.setTitle(req.title().trim());
         meeting.setMeetingDate(req.meetingDate());
         meeting.setHost(req.host().trim());
-        meeting.setAttendees(joinAttendees(validateAttendees(req.attendeeIds())));
+        meeting.setAttendees(joinAttendees(attendees));
         meeting.setNote(req.note() == null || req.note().isBlank() ? null : req.note().trim());
     }
 
